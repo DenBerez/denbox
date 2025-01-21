@@ -1,0 +1,11 @@
+{
+  "AppSyncApiName": "denbox",
+  "DynamoDBBillingMode": "PAY_PER_REQUEST",
+  "DynamoDBEnableServerSideEncryption": false,
+  "AuthCognitoUserPoolId": {
+    "Fn::GetAtt": [
+      "authdenbox5904d2e9",
+      "Outputs.UserPoolId"
+    ]
+  }
+}

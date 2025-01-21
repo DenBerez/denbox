@@ -1,0 +1,23 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-denbox-dev-86dc4-authRole",
+      "UnauthRoleArn": "arn:aws:iam::757914040801:role/amplify-denbox-dev-86dc4-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::757914040801:role/amplify-denbox-dev-86dc4-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-denbox-dev-86dc4-deployment",
+      "UnauthRoleName": "amplify-denbox-dev-86dc4-unauthRole",
+      "StackName": "amplify-denbox-dev-86dc4",
+      "StackId": "arn:aws:cloudformation:us-east-1:757914040801:stack/amplify-denbox-dev-86dc4/c6b0e080-d754-11ef-9354-0e9149fa8db1",
+      "AmplifyAppId": "d2nargc9qbn654"
+    },
+    "categories": {
+      "auth": {
+        "denbox5904d2e9": {}
+      },
+      "api": {
+        "denbox": {}
+      }
+    }
+  }
+}

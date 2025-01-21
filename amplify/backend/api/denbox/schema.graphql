@@ -1,0 +1,82 @@
+enum GameStatus {
+  SETUP
+  LOBBY
+  PLAYING
+  ROUND_END
+  FINISHED
+}
+
+enum GameType {
+  LETTER_RACE
+  SPEED_WORDS
+}
+
+type Game @model 
+@auth(rules: [
+  { allow: public }
+]) {
+  id: ID!
+  code: String! @index(name: "byCode", queryField: "gameByCode")
+  status: GameStatus!
+  hostId: ID!
+  players: [Player] @hasMany
+  currentRound: Int!
+  maxRounds: Int!
+  gameType: GameType
+  # Game-specific fields
+  currentLetters: String       # For LETTER_PAIR
+  timeRemaining: Int          # Common timer field
+  roundStartTime: AWSDateTime # To track round timing
+  questions: [Question] @hasMany
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  settings: AWSJSON  # Store JSON string of game settings
+}
+
+type Player @model 
+@auth(rules: [
+  { allow: public }
+]) {
+  id: ID!
+  gameId: ID! @index(name: "byGame")
+  name: String!
+  score: Int!
+  isHost: Boolean!
+  isConfirmed: Boolean
+  answers: [Answer] @hasMany
+  # Game-specific fields
+  currentWords: [String]      # For LETTER_PAIR
+  game: Game @belongsTo(fields: ["gameId"])
+}
+
+type Question @model 
+@auth(rules: [
+  { allow: public }
+]) {
+  id: ID!
+  gameId: ID! @index(name: "byGame")
+  content: String!
+  roundNumber: Int!
+  answers: [Answer] @hasMany
+  game: Game @belongsTo(fields: ["gameId"])
+}
+
+type Answer @model 
+@auth(rules: [
+  { allow: public, operations: [read] },
+  { allow: owner, operations: [create, update, delete] }
+]) {
+  id: ID!
+  questionId: ID! @index(name: "byQuestion")
+  playerId: ID! @index(name: "byPlayer")
+  content: String!
+  votes: Int!
+  player: Player @belongsTo(fields: ["playerId"])
+  question: Question @belongsTo(fields: ["questionId"])
+}
+
+type Subscription {
+  onUpdateGameById(id: ID!): Game @aws_subscribe(mutations: ["updateGame"])
+  onCreatePlayerByGameId(gameId: ID!): Player @aws_subscribe(mutations: ["createPlayer"])
+  onUpdatePlayerByGameId(gameId: ID!): Player @aws_subscribe(mutations: ["updatePlayer"])
+}
