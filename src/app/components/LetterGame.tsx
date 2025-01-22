@@ -18,10 +18,12 @@ import {
   CssBaseline,
   Avatar,
   Chip,
+  Fade,
 } from '@mui/material';
 import { generateClient } from 'aws-amplify/api';
-import { updateGame, updatePlayer } from '@/graphql/mutations';
+import { updateGame, updatePlayer, createPlayer } from '@/graphql/mutations';
 import { getPlayer, getGame, playersByGameId } from '@/graphql/queries';
+import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
 import { GameStatus, GameType } from '@/types/game';
 import { validateGameStart, validateGameSettings } from '@/utils/gameValidation';
 import PlayerList from './PlayerList';
@@ -39,6 +41,8 @@ import {
   EmojiEvents as TrophyIcon,
   Home as HomeIcon 
 } from '@mui/icons-material';
+import { GraphQLResult } from '@aws-amplify/api';
+import { API } from 'aws-amplify';
 
 const client = generateClient();
 
@@ -50,8 +54,8 @@ interface LetterGameProps {
 }
 
 export default function LetterGameComponent({ game, onGameUpdate }: LetterGameProps) {
-  const [playerId, setPlayerId] = useState<string | null>(null);
-  const [player, setPlayer] = useState<any>(null);
+  const [player, setPlayer] = useState<Player | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
   const [words, setWords] = useState<string[]>([]);
   const wordsRef = useRef<string[]>([]);
   const [word, setWord] = useState('');
@@ -82,10 +86,10 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     }
     return letterRaceDefaults;
   });
-  const [players, setPlayers] = useState<any[]>([]);
   const [playerName, setPlayerName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [gameEngine, setGameEngine] = useState<LetterGame | null>(null);
+  const playerCreationAttempted = useRef(false);
 
   // Update ref whenever words state changes
   useEffect(() => {
@@ -116,13 +120,29 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     };
   }, [isPlaying]);
 
+
+  // Update current player whenever players array changes
   useEffect(() => {
-    const storedPlayerId = localStorage.getItem('playerId');
-    if (storedPlayerId) {
-      fetchPlayer(storedPlayerId);
-      fetchPlayers();
+    const storedPlayerId = localStorage.getItem(`player_${game.id}`);
+    if (storedPlayerId && players.length > 0) {
+      const currentPlayer = players.find(p => p.id === storedPlayerId);
+      if (currentPlayer) {
+        setPlayer(currentPlayer);
+        setIsHost(currentPlayer.isHost);
+      } else {
+        // Only clear storage if we're sure the player doesn't exist
+        localStorage.removeItem(`player_${game.id}`);
+        setPlayer(null);
+        setIsHost(false);
+      }
     }
-  }, [game.id]);
+  }, [players, game.id]);
+
+  // Add debug logging
+  useEffect(() => {
+    console.log('Current player:', player);
+    console.log('All players:', players);
+  }, [player, players]);
 
   useEffect(() => {
     if (game.status === GameStatus.ROUND_END) {
@@ -152,33 +172,81 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     }
   }, [player?.currentWords]);
 
-  const fetchPlayer = async (id: string) => {
-    try {
-      const result = await client.graphql({
-        query: getPlayer,
-        variables: { id }
-      });
-      
-      if (result.data.getPlayer) {
-        console.log('Fetched player data:', result.data.getPlayer);
-        const playerData = result.data.getPlayer;
-        setPlayer(playerData);
-        
-        // Ensure we're properly loading saved words
-        if (Array.isArray(playerData.currentWords)) {
-          console.log('Loading saved words:', playerData.currentWords);
-          setWords(playerData.currentWords);
-        } else {
-          console.log('No saved words found, initializing empty array');
-          setWords([]);
-        }
-        
-        setIsHost(playerData.isHost);
+  useEffect(() => {
+    if (game.settings) {
+      try {
+        const parsedSettings = JSON.parse(game.settings);
+        setSettings(parsedSettings);
+      } catch (e) {
+        console.error('Error parsing game settings:', e);
       }
-    } catch (error) {
-      console.error('Error fetching player:', error);
     }
-  };
+  }, [game.settings]);
+
+  useEffect(() => {
+    const playerManager = async () => {
+      if (!game?.id) return;
+      
+      try {
+        // 1. Get all current players
+        const existingPlayersResult = await client.graphql({
+          query: playersByGameId,
+          variables: { gameId: game.id }
+        });
+        
+        const existingPlayers = existingPlayersResult.data.playersByGameId.items || [];
+        setPlayers(existingPlayers);
+
+        // 2. Check for stored player ID
+        const storedPlayerId = localStorage.getItem(`player_${game.id}`);
+        const existingPlayer = existingPlayers.find(p => p.id === storedPlayerId);
+
+        if (existingPlayer) {
+          setPlayer(existingPlayer);
+          setIsHost(existingPlayer.isHost);
+          return;
+        }
+
+        // 3. Only create new player if we haven't found an existing one
+        if (!existingPlayer && !playerCreationAttempted.current) {
+          playerCreationAttempted.current = true;
+          
+          const isHost = existingPlayers.length === 0;
+          const playerName = `Player ${Math.floor(Math.random() * 1000)}`;
+          
+          const newPlayer = await client.graphql({
+            query: createPlayer,
+            variables: {
+              input: {
+                gameId: game.id,
+                name: playerName,
+                score: 0,
+                isHost,
+                isConfirmed: false,
+                currentWords: [],
+                gamePlayersId: game.id
+              }
+            }
+          });
+
+          if (newPlayer.data.createPlayer) {
+            localStorage.setItem(`player_${game.id}`, newPlayer.data.createPlayer.id);
+            setPlayer(newPlayer.data.createPlayer);
+            setIsHost(isHost);
+          }
+        }
+      } catch (error) {
+        console.error('Error in player management:', error);
+      }
+    };
+
+    playerManager();
+
+    // Cleanup
+    return () => {
+      playerCreationAttempted.current = false;
+    };
+  }, [game?.id]);
 
   const fetchPlayers = async () => {
     try {
@@ -218,8 +286,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
   const startRound = async () => {
     try {
       // Ensure we're using the current settings from the game state
-      const currentSettings = JSON.parse(game.settings);
+      const currentSettings = game.settings ? JSON.parse(game.settings) : settings;
       
+      // Generate new letters for the round
       const newLetters = Array(currentSettings.lettersPerRound)
         .fill('')
         .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
@@ -234,21 +303,23 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             currentRound: game.currentRound + 1,
             timeRemaining: currentSettings.timePerRound,
             currentLetters: newLetters,
-            settings: game.settings // Preserve the current settings
+            roundStartTime: new Date().toISOString()
           }
         }
       });
 
+      // Reset local state
       setWords([]);
       setWord('');
       setLetters(newLetters);
       setIsPlaying(true);
       setTimeLeft(currentSettings.timePerRound);
-      setSettings(currentSettings); // Update local settings state
+      setSettings(currentSettings);
 
       onGameUpdate(result.data.updateGame);
     } catch (error) {
       console.error('Error starting round:', error);
+      throw error;
     }
   };
 
@@ -455,17 +526,25 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
         showRoundInfo={game.status !== 'LOBBY'} 
       />
 
-      {game.status === 'LOBBY' && (
-        <>
-     
-          <Lobby
-            game={game}
-            player={player}
-            players={players}
-            onStartGame={startRound}
-            settings={settings}
-          />
-        </>
+      {game.status === 'LOBBY' && player && (
+        <Lobby
+          game={game}
+          player={player}
+          players={players}
+          onStartGame={startRound}
+          settings={settings}
+        />
+      )}
+
+      {game.status === 'LOBBY' && !player && (
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '200px' 
+        }}>
+          <CircularProgress />
+        </Box>
       )}
 
       {game.status === 'PLAYING' && (
@@ -571,41 +650,70 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
           </Paper>
 
           <form onSubmit={handleWordSubmit}>
-            <TextField
-              fullWidth
-              label={`Enter word using letters: ${letters}`}
-              value={word}
-              onChange={(e) => {
-                // Only allow letters
-                const input = e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase();
-                setWord(input);
-                setError(null);
-              }}
-              variant="outlined"
-              autoComplete="off"
-              disabled={!isPlaying}
-              error={!!error}
-              helperText={error || `Word must be at least ${settings.minWordLength} letters and contain the letters in order`}
-              sx={{ mb: 3 }}
-              InputProps={{
-                onKeyDown: (e) => {
-                  // Prevent spaces in the input
-                  if (e.key === ' ') {
-                    e.preventDefault();
+            <Box sx={{ mb: 4 }}>
+              <TextField
+                fullWidth
+                label={`Letters: ${letters}`}
+                value={word}
+                onChange={(e) => {
+                  const input = e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase();
+                  setWord(input);
+                  setError(null);
+                }}
+                variant="outlined"
+                autoComplete="off"
+                disabled={!isPlaying}
+                error={!!error}
+                helperText={error || `Word must be at least ${settings.minWordLength} letters and contain the letters in order`}
+                sx={{
+                  mb: 2,
+                  '& .MuiOutlinedInput-root': {
+                    fontSize: '1.2rem',
+                    letterSpacing: '0.05em',
+                    '& fieldset': {
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root': {
+                    fontSize: '1rem',
                   }
-                }
-              }}
-            />
-            <Button
-              type="submit"
-              variant="contained"
-              color="primary"
-              disabled={!isPlaying || !word || word.length < settings.minWordLength}
-              onClick={handleWordSubmit}
-              fullWidth
-            >
-              Submit Word
-            </Button>
+                }}
+                InputProps={{
+                  onKeyDown: (e) => {
+                    if (e.key === ' ') e.preventDefault();
+                  },
+                  sx: { 
+                    bgcolor: 'background.paper',
+                  }
+                }}
+              />
+              <Button
+                type="submit"
+                variant="contained"
+                color="primary"
+                disabled={!isPlaying || !word || word.length < settings.minWordLength}
+                onClick={handleWordSubmit}
+                fullWidth
+                sx={{
+                  py: 1.5,
+                  fontSize: '1.1rem',
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  borderRadius: 2,
+                  background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
+                  boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
+                  transition: 'transform 0.2s',
+                  '&:hover': {
+                    transform: 'scale(1.02)',
+                  },
+                  '&:disabled': {
+                    background: 'linear-gradient(45deg, #9e9e9e 30%, #bdbdbd 90%)',
+                  }
+                }}
+              >
+                Submit Word
+              </Button>
+            </Box>
           </form>
 
           <Paper 
@@ -613,39 +721,89 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             sx={{ 
               p: 4,
               borderRadius: 2,
-              bgcolor: 'background.paper'
+              bgcolor: 'background.paper',
+              border: '1px solid',
+              borderColor: 'divider',
             }}
           >
-            <Typography 
-              variant="h6" 
-              sx={{ 
-                mb: 3,
-                fontWeight: 600 
-              }}
-            >
-              Your Words
-            </Typography>
-            <List>
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 2, 
+              mb: 3 
+            }}>
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  fontWeight: 600,
+                  color: 'primary.main',
+                  flex: 1
+                }}
+              >
+                Your Words
+              </Typography>
+              <Chip 
+                label={`${words.length} words`}
+                color="primary"
+                variant="outlined"
+                size="small"
+              />
+            </Box>
+            
+            <List sx={{ 
+              maxHeight: 300, 
+              overflowY: 'auto',
+              '&::-webkit-scrollbar': {
+                width: '8px',
+              },
+              '&::-webkit-scrollbar-track': {
+                bgcolor: 'background.paper',
+                borderRadius: '4px',
+              },
+              '&::-webkit-scrollbar-thumb': {
+                bgcolor: 'primary.main',
+                borderRadius: '4px',
+              }
+            }}>
               {words.map((word, index) => (
                 <ListItem 
                   key={index}
                   sx={{
-                    borderRadius: 1,
+                    borderRadius: 2,
                     mb: 1,
+                    bgcolor: 'background.default',
+                    border: '1px solid',
+                    borderColor: 'divider',
                     '&:hover': {
-                      bgcolor: 'background.default'
+                      bgcolor: 'action.hover',
+                      borderColor: 'primary.main',
                     }
                   }}
                 >
                   <ListItemText 
-                    primary={
-                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                        {word}
-                      </Typography>
-                    }
+                    primary={word}
+                    primaryTypographyProps={{
+                      sx: { 
+                        fontWeight: 500,
+                        letterSpacing: '0.05em',
+                      }
+                    }}
                   />
                 </ListItem>
               ))}
+              {words.length === 0 && (
+                <Typography 
+                  variant="body2" 
+                  color="text.secondary"
+                  sx={{ 
+                    textAlign: 'center',
+                    py: 4,
+                    fontStyle: 'italic'
+                  }}
+                >
+                  No words submitted yet
+                </Typography>
+              )}
             </List>
           </Paper>
         </>

@@ -51,15 +51,17 @@ export const validateGameSettings = (settings: GameSettings, gameType: GameType)
   };
 };
 
-export const validateGameStart = (players: any[], settings: GameSettings): ValidationResult => {
+export const validateGameStart = (players: Player[], settings: GameSettings): ValidationResult => {
   const errors: string[] = [];
-  const confirmedPlayers = players.filter(p => p.isConfirmed);
+  
+  // Count all players since we're not using isConfirmed anymore
+  const playerCount = players.length;
 
-  if (confirmedPlayers.length < settings.minPlayers) {
-    errors.push(`Need at least ${settings.minPlayers} players to start (currently have ${confirmedPlayers.length})`);
+  if (playerCount < settings.minPlayers) {
+    errors.push(`Need at least ${settings.minPlayers} players to start (currently have ${playerCount})`);
   }
 
-  if (confirmedPlayers.length > settings.maxPlayers) {
+  if (playerCount > settings.maxPlayers) {
     errors.push(`Cannot start with more than ${settings.maxPlayers} players`);
   }
 

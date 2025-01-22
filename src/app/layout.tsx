@@ -1,8 +1,8 @@
+import '@/config/amplify';
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import ThemeRegistry from '@/components/ThemeRegistry';
 import "./globals.css";
-import '../config/amplify';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

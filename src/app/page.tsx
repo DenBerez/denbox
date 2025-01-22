@@ -1,176 +1,132 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-  Box, 
-  Container, 
-  Typography, 
-  Button, 
-  TextField, 
-  Paper, 
-  Divider,
-  CircularProgress,
-  CssBaseline,
-} from '@mui/material';
-import { Add as AddIcon, Login as LoginIcon } from '@mui/icons-material';
-import { generateClient } from 'aws-amplify/api';
-import { createGame, createPlayer, updateGame } from '../graphql/mutations';
-import { gameByCode } from '../graphql/queries';
-import { useRouter } from 'next/navigation';
 import { Amplify } from 'aws-amplify';
-import config from '../amplifyconfiguration.json';
-import { letterRaceDefaults } from '@/constants/gameSettings';
-import { GameType, Game } from '@/types/game';
-import { GameSettings } from '@/types/settings';
+import awsconfig from '../aws-exports';
+import {
+  Box,
+  Typography,
+  TextField,
+  Button,
+  Container,
+  Paper,
+  CircularProgress,
+  Divider,
+  Alert,
+} from '@mui/material';
+import { generateClient } from 'aws-amplify/api';
+import { createGame, createPlayer } from '@/graphql/mutations';
+import { getGame } from '@/graphql/queries';
+import { GameStatus, GameType, GameTypeConfig } from '@/types/game';
+import { getDefaultSettings } from '@/constants/gameSettings';
+import { useRouter } from 'next/navigation';
+import AddIcon from '@mui/icons-material/Add';
+import GameTypeSelector from './components/GameTypeSelector';
+import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
 
-Amplify.configure(config);
+// Configure Amplify with aws-exports
+Amplify.configure({
+  ...awsconfig,
+  ssr: true
+});
+
 const client = generateClient();
 
-interface GameProps {
-  game: Game;
-  onGameUpdate: (game: Game) => void;
-}
-
 export default function Home() {
-  const router = useRouter();
-  const [mounted, setMounted] = useState(false);
   const [gameCode, setGameCode] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [showGameTypeSelector, setShowGameTypeSelector] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const generateGameCode = () => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += characters.charAt(Math.floor(Math.random() * characters.length));
+  const handleJoinGame = async () => {
+    if (!gameCode.trim()) {
+      setError('Please enter a game code');
+      return;
     }
-    return code;
-  };
 
-  const generatePlayerId = () => {
-    // Implement your logic to generate a unique player ID
-    return 'generatedPlayerId';
-  };
+    setLoading(true);
+    setError(null);
 
-  const handleCreateGame = async () => {
     try {
-      setLoading(true);
-      const code = generateGameCode();
-      const tempHostId = 'temp-' + Date.now();
-      
-      const initialSettings = letterRaceDefaults;
-      
       const result = await client.graphql({
-        query: createGame,
-        variables: {
-          input: {
-            code: code,
-            status: 'SETUP',
-            hostId: tempHostId,
-            currentRound: 0,
-            maxRounds: initialSettings.maxRounds,
-            currentLetters: '',
-            settings: JSON.stringify(initialSettings),
-            timeRemaining: initialSettings.timePerRound
-          }
-        }
+        query: getGame,
+        variables: { id: gameCode.toUpperCase() }
       });
 
-      // Create the host player
-      const playerResult = await client.graphql({
-        query: createPlayer,
-        variables: {
-          input: {
-            gameId: result.data.createGame.id,
-            name: 'Host',
-            score: 0,
-            isHost: true,
-            isConfirmed: true,
-            currentWords: []
-          }
-        }
-      });
+      const game = result.data.getGame;
+      if (!game) {
+        setError('Game not found');
+        return;
+      }
 
-      // Update game with the real hostId
-      await client.graphql({
-        query: updateGame,
-        variables: {
-          input: {
-            id: result.data.createGame.id,
-            hostId: playerResult.data.createPlayer.id
-          }
-        }
-      });
+      if (game.status === GameStatus.ENDED) {
+        setError('This game has ended');
+        return;
+      }
 
-      localStorage.setItem('playerId', playerResult.data.createPlayer.id);
-      router.push(`/game/${result.data.createGame.id}`);
+      router.push(`/game/${gameCode.toUpperCase()}`);
     } catch (error) {
-      console.error('Error creating game:', error);
-      setError('Error creating game');
+      console.error('Error joining game:', error);
+      setError('Failed to join game');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleJoinGame = async () => {
-    if (gameCode.length !== 4) return;
+  const handleCreateGame = async () => {
+    setShowGameTypeSelector(true);
+  };
+
+  const handleSelectGameType = async (gameType: GameTypeConfig) => {
+    setLoading(true);
+    setError(null);
 
     try {
-      setLoading(true);
+      // Generate a 4-character code using uppercase letters and numbers
+      const gameCode = Array(4)
+        .fill(0)
+        .map(() => '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 36)])
+        .join('');
+        
+      const defaultSettings = getDefaultSettings(gameType.id);
+
+      console.log('Game code:', gameCode);
+      console.log('Game type:', gameType);
+      console.log('Default settings:', defaultSettings);
+
       const result = await client.graphql({
-        query: gameByCode,
+        query: createGame,
         variables: {
-          code: gameCode.toUpperCase()
+          input: {
+            id: gameCode,
+            code: gameCode,
+            gameType: gameType.id,
+            status: GameStatus.LOBBY,
+            settings: JSON.stringify(defaultSettings),
+            maxRounds: defaultSettings.maxRounds,
+            currentRound: 1,
+            timeRemaining: defaultSettings.timePerRound,
+            hostId: gameCode
+          }
         }
       });
 
-      const games = result.data.gameByCode.items;
-      if (games.length > 0) {
-        const game = games[0];
-        
-        // Check game status
-        if (game.status !== 'SETUP' && game.status !== 'LOBBY') {
-          setError('Game has already started');
-          return;
-        }
+      console.log('Game created:', result);
 
-        // Parse settings to check player limits
-        const settings = JSON.parse(game.settings);
-        
-        // Get current player count
-        const currentPlayers = game.players?.items?.length || 0;
-        if (currentPlayers >= settings.maxPlayers) {
-          setError('Game is full');
-          return;
-        }
-
-        // Create player with isConfirmed set to true
-        const playerResult = await client.graphql({
-          query: createPlayer,
-          variables: {
-            input: {
-              gameId: game.id,
-              name: 'Player',
-              score: 0,
-              isHost: false,
-              isConfirmed: true,  // Set this to true by default
-              currentWords: []
-            }
-          }
-        });
-
-        localStorage.setItem('playerId', playerResult.data.createPlayer.id);
-        router.push(`/game/${game.id}`);
+      if (result.data.createGame) {
+        router.push(`/game/${gameCode}`);
       } else {
-        setError('Game not found');
+        throw new Error('Failed to create game');
       }
     } catch (error) {
-      console.error('Error joining game:', error);
-      setError('Error joining game');
+      console.error('Error creating game:', error);
+      setError('Failed to create game');
     } finally {
       setLoading(false);
     }
@@ -181,54 +137,131 @@ export default function Home() {
   return (
     <Container maxWidth="sm" sx={{ minHeight: '100vh', py: 4 }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <Box sx={{ display: 'flex', mb: 2,justifyContent: 'center', alignItems: 'center', flexDirection: 'column'}}>
+        <Box sx={{ 
+          display: 'flex', 
+          mb: 2,
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          flexDirection: 'column'
+        }}>
           <img
-            src={
-              '/simpleBox.png'
-            }
+            src="/simpleBox.png"
             alt="Denbox Logo"
-            style={{ maxWidth: '200px', height: 'auto', marginBottom: '-20px' }}
+            style={{
+              width: '120px',
+              height: 'auto',
+              marginBottom: '1rem'
+            }}
           />
-        <Typography variant="h1" component="h1" align="center">
-          Denbox
-        </Typography>
-        
-        </Box>
-        <Paper elevation={3} sx={{ p: 3 }}>
-          <Typography variant="h2" sx={{ mb: 3 }}>
-            Join Game
+          <Typography 
+            variant="h1" 
+            align="center"
+            sx={{
+              ...textGradientStyles,
+              fontSize: { xs: '2.5rem', sm: '3.5rem' },
+              fontWeight: 700,
+              mb: 2
+            }}
+          >
+            Denbox
           </Typography>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <TextField
-              fullWidth
-              label="Game Code"
-              value={gameCode}
-              onChange={(e) => setGameCode(e.target.value.toUpperCase())}
-              error={!!error}
-              helperText={error}
-            />
+          <Typography 
+            variant="h2" 
+            align="center" 
+            color="text.secondary"
+            sx={{
+              fontSize: { xs: '1.25rem', sm: '1.5rem' },
+              fontWeight: 500,
+              maxWidth: '600px'
+            }}
+          >
+            A collection of fun party games to play with friends
+          </Typography>
+        </Box>
+
+        {showGameTypeSelector ? (
+          <GameTypeSelector onSelectGameType={handleSelectGameType} />
+        ) : (
+          <>
+            <Paper sx={{ ...paperStyles.gradient }}>
+              <Box sx={{ p: 3 }}>
+                <Typography 
+                  variant="h6" 
+                  gutterBottom
+                  sx={{ 
+                    ...textGradientStyles,
+                    mb: 3,
+                    fontWeight: 600
+                  }}
+                >
+                  Join Existing Game
+                </Typography>
+                <Box sx={{ 
+                  display: 'flex', 
+                  gap: 2,
+                  alignItems: 'flex-start'
+                }}>
+                  <TextField
+                    fullWidth
+                    label="Game Code"
+                    value={gameCode}
+                    onChange={(e) => {
+                      setGameCode(e.target.value.toUpperCase());
+                      setError(null);
+                    }}
+                    disabled={loading}
+                    error={!!error}
+                    helperText={error}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        '&:hover fieldset': {
+                          borderColor: 'primary.main',
+                        },
+                      },
+                    }}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={handleJoinGame}
+                    disabled={loading || !gameCode.trim()}
+                    sx={{
+                      ...buttonStyles.primary,
+                      height: 56, // Match TextField height
+                      minWidth: 120
+                    }}
+                  >
+                    {loading ? <CircularProgress size={24} /> : 'Join'}
+                  </Button>
+                </Box>
+              </Box>
+            </Paper>
+
+            <Divider sx={{ 
+              my: 2,
+              '&::before, &::after': {
+                borderColor: 'divider',
+              }
+            }}>
+              <Typography 
+                color="text.secondary"
+                sx={{ px: 2 }}
+              >
+                or
+              </Typography>
+            </Divider>
+
             <Button
               variant="contained"
-              onClick={handleJoinGame}
-              disabled={loading || !gameCode}
-              startIcon={loading ? <CircularProgress size={20} /> : <LoginIcon />}
+              size="large"
+              onClick={handleCreateGame}
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={20} /> : <AddIcon />}
+              sx={buttonStyles.primary}
             >
-              Join
+              Create New Game
             </Button>
-          </Box>
-        </Paper>
-
-        <Divider>or</Divider>
-
-        <Button
-          variant="contained"
-          size="large"
-          onClick={handleCreateGame}
-          disabled={loading}
-          startIcon={loading ? <CircularProgress size={20} /> : <AddIcon />}
-        >
-          Create New Game
-        </Button>
+          </>
+        )}
       </Box>
     </Container>
   );

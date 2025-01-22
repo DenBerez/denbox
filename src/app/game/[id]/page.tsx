@@ -8,31 +8,22 @@ import { updateGame } from '@/graphql/mutations';
 import { onUpdateGame } from '@/graphql/subscriptions';
 import GameTypeSelector from '@/app/components/GameTypeSelector';
 import LetterGameComponent from '@/app/components/LetterGame';
-import { GameStatus } from '@/types/game';
+import { Game, GameStatus } from '@/types/game';
 import { use } from 'react';
 
 const client = generateClient();
 
-export default function GamePage({ params }: { params: Promise<{ id: string }> }) {
-  // Unwrap the params promise using React.use()
+interface GamePageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default function GamePage({ params }: GamePageProps) {
+  // Unwrap the params Promise using React.use()
   const { id } = use(params);
-  
-  const [game, setGame] = useState<any>(null);
+  const [game, setGame] = useState<Game | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchGame();
-    const unsubscribe = subscribeToGameUpdates();
-    
-    const storedPlayerId = localStorage.getItem(`player_${id}`);
-    if (storedPlayerId) setPlayerId(storedPlayerId);
-
-    return () => {
-      unsubscribe();
-    };
-  }, [id]);
-
+  // Fetch game data
   const fetchGame = async () => {
     try {
       const result = await client.graphql({
@@ -40,28 +31,30 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
         variables: { id }
       });
       setGame(result.data.getGame);
-      setLoading(false);
     } catch (error) {
       console.error('Error fetching game:', error);
-      setLoading(false);
     }
   };
 
-  const subscribeToGameUpdates = () => {
-    const subscription = client.graphql({
-      query: onUpdateGame,
-      variables: { filter: { id: { eq: id } } }
-    }).subscribe({
-      next: ({ data }) => {
-        if (data?.onUpdateGame) {
-          setGame(data.onUpdateGame);
-        }
-      },
-      error: (error) => console.error('Subscription error:', error),
-    });
+  // Poll for game updates instead of using subscriptions
+  useEffect(() => {
+    fetchGame();
+    
+    // Poll every 3 seconds
+    const pollInterval = setInterval(() => {
+      fetchGame();
+    }, 3000);
 
-    return () => subscription.unsubscribe();
-  };
+    return () => clearInterval(pollInterval);
+  }, [id]);
+
+  // Store player ID in localStorage
+  useEffect(() => {
+    const storedPlayerId = localStorage.getItem(`player_${id}`);
+    if (storedPlayerId) {
+      setPlayerId(storedPlayerId);
+    }
+  }, [id]);
 
   const handleGameTypeSelect = async (gameType: any) => {
     try {
@@ -92,17 +85,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
     }
   };
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (!game) {
-    return <div>Game not found</div>;
-  }
+  if (!game) return <div>Loading...</div>;
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -111,7 +94,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
       ) : (
         <LetterGameComponent 
           game={game} 
-          onGameUpdate={setGame} 
+          onGameUpdate={(updatedGame) => setGame(updatedGame)} 
         />
       )}
     </Container>

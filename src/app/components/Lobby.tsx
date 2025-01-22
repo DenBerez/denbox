@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -17,6 +17,10 @@ import { getDefaultSettings } from '@/constants/gameSettings';
 import { Game, GameType, Player } from '@/types/game';
 import { LetterRaceSettings } from '@/types/settings';
 import { LetterGame } from '@/lib/games/LetterGame';
+import GameSettingsDialog from './GameSettingsDialog';
+import SettingsIcon from '@mui/icons-material/Settings';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
 
 const client = generateClient();
 
@@ -42,6 +46,15 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
     }
     return getDefaultSettings(game.gameType);
   });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [localPlayers, setLocalPlayers] = useState<Player[]>(players);
+
+  useEffect(() => {
+    if (!player) {
+      console.error('No player data found');
+      setError('Player data not found. Please try rejoining the game.');
+    }
+  }, [player]);
 
   const handleUpdateSettings = async (newSettings: LetterRaceSettings) => {
     setLocalSettings(newSettings);
@@ -62,22 +75,28 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
     }
   };
 
-  const handleStartGame = async () => {
+  const handlePlayersUpdate = (updatedPlayers: Player[]) => {
+    setLocalPlayers(updatedPlayers);
+  };
+
+  const handleStartGame = async (players: Player[]) => {
     if (!localSettings) {
       setError('Game settings not found');
       return;
     }
 
     setLoading(true);
+    setError(null);
+
     try {
-      const playerValidation = validateGameStart(players, localSettings);
-      if (!playerValidation.isValid) {
-        setError(playerValidation.error);
+      const validationResult = validateGameStart(players, localSettings);
+      if (!validationResult.isValid) {
+        setError(validationResult.errors[0]);
+        setLoading(false);
         return;
       }
 
       onStartGame();
-      setError(null);
     } catch (error) {
       console.error('Error starting game:', error);
       setError('Failed to start game');
@@ -87,20 +106,63 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <PlayerList 
         gameId={game.id} 
         currentPlayer={player}
+        onPlayersUpdate={handlePlayersUpdate}
       />
       
-      {player?.isHost && (
-        <GameSettings
-          gameType={game.gameType}
-          settings={localSettings}
-          onUpdateSettings={handleUpdateSettings}
-          isHost={player?.isHost}
-        />
-      )}
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'flex-end', 
+        gap: 2,
+        flexWrap: 'wrap'
+      }}>
+        <Button
+          variant="outlined"
+          onClick={() => setSettingsOpen(true)}
+          startIcon={<SettingsIcon />}
+          sx={{
+            borderRadius: 2,
+            px: 3,
+            py: 1.5,
+            fontSize: '1rem',
+            fontWeight: 600,
+            '&:hover': {
+              borderColor: 'primary.main',
+              bgcolor: 'rgba(33, 150, 243, 0.1)'
+            }
+          }}
+        >
+          Game Settings
+        </Button>
+        
+        {player?.isHost && (
+          <Button
+            variant="contained"
+            onClick={() => handleStartGame(localPlayers)}
+            size="large"
+            startIcon={loading ? <CircularProgress size={24} /> : <PlayArrowIcon />}
+            disabled={loading}
+            sx={{ 
+              ...buttonStyles.primary,
+              minWidth: 180
+            }}
+          >
+            {loading ? 'Starting...' : 'Start Game'}
+          </Button>
+        )}
+      </Box>
+
+      <GameSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        gameType={game.gameType}
+        settings={localSettings}
+        onUpdateSettings={handleUpdateSettings}
+        isHost={player?.isHost}
+      />
 
       {error && (
         <Alert 
@@ -117,36 +179,6 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
         >
           {error}
         </Alert>
-      )}
-
-      {player?.isHost && (
-        <Button
-          variant="contained"
-          onClick={handleStartGame}
-          size="large"
-          sx={{ 
-            py: 2,
-            px: 4,
-            fontSize: '1.2rem',
-            fontWeight: 600
-          }}
-          disabled={loading}
-        >
-          {loading ? (
-            <>
-              <CircularProgress
-                size={24}
-                sx={{ 
-                  mr: 2,
-                  color: 'inherit'
-                }}
-              />
-              Starting...
-            </>
-          ) : (
-            'Start Game'
-          )}
-        </Button>
       )}
     </Box>
   );

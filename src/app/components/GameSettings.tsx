@@ -1,20 +1,23 @@
-import { Box, Typography, TextField, Paper, Grid } from '@mui/material';
+import { Box, Typography, TextField, Grid } from '@mui/material';
 import { GameType } from '@/types/game';
 import { LetterRaceSettings } from '@/types/settings';
 import { getDefaultSettings, letterRaceDefaults } from '@/constants/gameSettings';
+import { paperStyles, textGradientStyles } from '@/constants/styles';
 
 interface GameSettingsProps {
   gameType: GameType;
   settings: LetterRaceSettings;
   onUpdateSettings: (settings: LetterRaceSettings) => void;
   isHost: boolean;
+  showTitle?: boolean;
 }
 
 export default function GameSettings({ 
   gameType, 
   settings, 
   onUpdateSettings, 
-  isHost 
+  isHost,
+  showTitle = true
 }: GameSettingsProps) {  
   if (!isHost || !settings) return null;
 
@@ -24,18 +27,41 @@ export default function GameSettings({
     onUpdateSettings(newSettings);
   };
 
-  console.log('settings', settings);
-  console.log('gameType', gameType);
+  const settingBox = {
+    p: 2,
+    height: '100%',
+    bgcolor: 'background.paper',
+    borderRadius: 2,
+    border: '1px solid',
+    borderColor: 'divider',
+    transition: 'border-color 0.2s ease',
+    '&:hover': {
+      borderColor: 'primary.main',
+    }
+  };
 
   return (
-    <Paper elevation={3} sx={{ p: 3, bgcolor: 'background.paper', borderRadius: 2 }}>
-      <Typography variant="h2" sx={{ mb: 3 }}>Game Settings</Typography>
+    <Box sx={{ p: 3 }}>
+      {showTitle && (
+        <Typography variant="h2" sx={{ 
+          mb: 3,
+          ...textGradientStyles
+        }}>
+          Game Settings
+        </Typography>
+      )}
       
       <Grid container spacing={3}>
         {/* Basic Game Settings */}
         <Grid item xs={12} md={6}>
-          <Box sx={{ p: 2, height: '100%', bgcolor: 'background.default', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>Basic Game Settings</Typography>
+          <Box sx={settingBox}>
+            <Typography variant="subtitle1" sx={{ 
+              mb: 2, 
+              fontWeight: 'bold',
+              color: 'primary.main'
+            }}>
+              Basic Game Settings
+            </Typography>
             
             <Grid container spacing={2}>
               <Grid item xs={12}>
@@ -69,8 +95,14 @@ export default function GameSettings({
 
         {/* Player Settings */}
         <Grid item xs={12} md={6}>
-          <Box sx={{ p: 2, height: '100%', bgcolor: 'background.default', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>Player Settings</Typography>
+          <Box sx={settingBox}>
+            <Typography variant="subtitle1" sx={{ 
+              mb: 2, 
+              fontWeight: 'bold',
+              color: 'primary.main'
+            }}>
+              Player Settings
+            </Typography>
 
             <Grid container spacing={2}>
               <Grid item xs={12}>
@@ -104,8 +136,14 @@ export default function GameSettings({
         {/* Game-specific settings */}
         {gameType === GameType.LETTER_RACE && (
           <Grid item xs={12} md={6}>
-            <Box sx={{ p: 2, height: '100%', bgcolor: 'background.default', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>Letter Race Settings</Typography>
+            <Box sx={settingBox}>
+              <Typography variant="subtitle1" sx={{ 
+                mb: 2, 
+                fontWeight: 'bold',
+                color: 'primary.main'
+              }}>
+                Letter Race Settings
+              </Typography>
               
               <Grid container spacing={2}>
                 <Grid item xs={12}>
@@ -138,7 +176,7 @@ export default function GameSettings({
           </Grid>
         )}
       </Grid>
-    </Paper>
+    </Box>
   );
 }
 
