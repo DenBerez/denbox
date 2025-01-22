@@ -19,45 +19,16 @@ import { gameByCode } from '../graphql/queries';
 import { useRouter } from 'next/navigation';
 import { Amplify } from 'aws-amplify';
 import config from '../amplifyconfiguration.json';
-import { letterPairDefaults } from '@/constants/gameSettings';
+import { letterRaceDefaults } from '@/constants/gameSettings';
+import { GameType, Game } from '@/types/game';
+import { GameSettings } from '@/types/settings';
 
 Amplify.configure(config);
 const client = generateClient();
 
-interface GameSettings {
-  maxRounds: number;
-  timePerRound: number;
-  minPlayers: number;
-  maxPlayers: number;
-  // Add other common settings
-}
-
-interface BaseGame {
-  id: string;
-  type: GameType;
-  name: string;
-  description: string;
-  tutorial: string; 
-  icon: React.ReactNode;
-  defaultSettings: GameSettings;
-  component: React.ComponentType<GameProps>;
-}
-
-interface GameType {
-  id: string;
-  title: string;
-  description: string;
-  tutorial: string;
-  icon: React.ReactNode;
-  maxRounds: number;
-  defaultSettings: GameSettings;
-}
-
 interface GameProps {
-  game: any;
-  player: any;
-  onGameUpdate: (updatedGame: any) => void;
-  settings: GameSettings;
+  game: Game;
+  onGameUpdate: (game: Game) => void;
 }
 
 export default function Home() {
@@ -91,8 +62,7 @@ export default function Home() {
       const code = generateGameCode();
       const tempHostId = 'temp-' + Date.now();
       
-      // Use letterPairDefaults as the initial game settings
-      const initialSettings = letterPairDefaults;
+      const initialSettings = letterRaceDefaults;
       
       const result = await client.graphql({
         query: createGame,
@@ -211,10 +181,19 @@ export default function Home() {
   return (
     <Container maxWidth="sm" sx={{ minHeight: '100vh', py: 4 }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <Box sx={{ display: 'flex', mb: 2,justifyContent: 'center', alignItems: 'center', flexDirection: 'column'}}>
+          <img
+            src={
+              '/simpleBox.png'
+            }
+            alt="Denbox Logo"
+            style={{ maxWidth: '200px', height: 'auto', marginBottom: '-20px' }}
+          />
         <Typography variant="h1" component="h1" align="center">
           Denbox
         </Typography>
         
+        </Box>
         <Paper elevation={3} sx={{ p: 3 }}>
           <Typography variant="h2" sx={{ mb: 3 }}>
             Join Game

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -16,6 +16,8 @@ import {
   ThemeProvider,
   createTheme,
   CssBaseline,
+  Avatar,
+  Chip,
 } from '@mui/material';
 import { generateClient } from 'aws-amplify/api';
 import { updateGame, updatePlayer } from '@/graphql/mutations';
@@ -29,50 +31,29 @@ import Lobby from './Lobby';
 import PostRoundScreen from './PostRoundScreen';
 import PlayerNameInput from './PlayerNameInput';
 import GameTypeSelector from '@/app/components/GameTypeSelector';
-import { letterPairDefaults } from '@/constants/gameSettings';
 import { darkTheme } from '@/theme';
-import { LetterPairSettings } from '@/types/settings';
+import { LetterGame } from '@/lib/games/LetterGame';
+import { LetterRaceSettings } from '@/types/settings';
+import { letterRaceDefaults } from '@/constants/gameSettings';
+import { 
+  EmojiEvents as TrophyIcon,
+  Home as HomeIcon 
+} from '@mui/icons-material';
 
 const client = generateClient();
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-interface GameSettings {
-  maxRounds: number;
-  timePerRound: number;
-  minPlayers: number;
-  maxPlayers: number;
-}
-
-interface LetterGameSettings extends GameSettings {
-  minWordLength: number;
-  lettersPerRound: number;
-}
 
 interface LetterGameProps {
   game: any;
   onGameUpdate: (game: any) => void;
 }
 
-const defaultSettings: LetterGameSettings = {
-  maxRounds: 3,
-  timePerRound: 60,
-  minPlayers: 2,
-  maxPlayers: 8,
-  minWordLength: 4,
-  lettersPerRound: 2
-};
-
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
-
-export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
+export default function LetterGameComponent({ game, onGameUpdate }: LetterGameProps) {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [player, setPlayer] = useState<any>(null);
   const [words, setWords] = useState<string[]>([]);
+  const wordsRef = useRef<string[]>([]);
   const [word, setWord] = useState('');
   const [letters, setLetters] = useState(game.currentLetters || '');
   const [timeLeft, setTimeLeft] = useState<number>(() => {
@@ -83,72 +64,49 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
         return parsedSettings.timePerRound;
       } catch (e) {
         console.error('Error parsing settings for time:', e);
+        return letterRaceDefaults.timePerRound;
       }
     }
-    return defaultSettings.timePerRound;
+    return letterRaceDefaults.timePerRound;
   });
   const [isPlaying, setIsPlaying] = useState(game.status === 'PLAYING');
   const [isHost, setIsHost] = useState(false);
-  const [settings, setSettings] = useState<LetterPairSettings>(() => {
+  const [settings, setSettings] = useState<LetterRaceSettings>(() => {
     if (game.settings) {
       try {
-        return JSON.parse(game.settings) as LetterPairSettings;
+        return JSON.parse(game.settings) as LetterRaceSettings;
       } catch (e) {
         console.error('Error parsing game settings:', e);
-        return letterPairDefaults;
+        return letterRaceDefaults;
       }
     }
-    return letterPairDefaults;
+    return letterRaceDefaults;
   });
   const [players, setPlayers] = useState<any[]>([]);
   const [playerName, setPlayerName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [gameEngine, setGameEngine] = useState<LetterGame | null>(null);
 
-  const endRound = async () => {
-    try {
-      const nextRound = game.currentRound + 1;
-      const result = await client.graphql({
-        query: updateGame,
-        variables: {
-          input: {
-            id: game.id,
-            status: nextRound >= settings.maxRounds ? 'FINISHED' : 'ROUND_END',
-            currentRound: game.currentRound,
-            timeRemaining: 0
-          }
-        }
-      });
-      onGameUpdate(result.data.updateGame);
-      setIsPlaying(false);
-    } catch (error) {
-      console.error('Error ending round:', error);
-    }
-  };
+  // Update ref whenever words state changes
+  useEffect(() => {
+    wordsRef.current = words;
+  }, [words]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isPlaying && timeLeft > 0) {
+      // Clear any existing timer first
+      if (timer) clearInterval(timer);
+      
       timer = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
-          // Update server with remaining time
-          if (isHost) {
-            client.graphql({
-              query: updateGame,
-              variables: {
-                input: {
-                  id: game.id,
-                  timeRemaining: newTime,
-                  settings: JSON.stringify(settings)
-                }
-              }
-            });
-          }
-          if (newTime <= 0 && isHost) {
-            endRound();
+          if (newTime <= 0) {
             clearInterval(timer);
+            // Remove isHost check so any player can trigger round end when their timer expires
+            endRound();
           }
-          return newTime;
+          return Math.max(newTime, 0);
         });
       }, 1000);
     }
@@ -156,7 +114,7 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [isPlaying, timeLeft, isHost, settings]);
+  }, [isPlaying]);
 
   useEffect(() => {
     const storedPlayerId = localStorage.getItem('playerId');
@@ -167,15 +125,32 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
   }, [game.id]);
 
   useEffect(() => {
-    // Update local state when game updates
-    if (game.status === 'PLAYING') {
-      setIsPlaying(true);
-      setLetters(game.currentLetters || '');  // Make sure to use the letters from the game state
-      setTimeLeft(game.timeRemaining || settings.timePerRound);
-    } else if (game.status === 'ROUND_END' && isPlaying) {
+    if (game.status === GameStatus.ROUND_END) {
       setIsPlaying(false);
+      setTimeLeft(0);
+      fetchPlayers();
+    } else if (game.status === GameStatus.PLAYING) {
+      setIsPlaying(true);
+      setTimeLeft(game.timeRemaining || settings.timePerRound);
+      setLetters(game.currentLetters || '');
+      
+      // Only reset words if this is a new round starting
+      // Check if the letters have changed, indicating a new round
+      if (letters !== game.currentLetters) {
+        setWords([]);
+      }
     }
+  }, [game.status, game.currentLetters]);
+
+  useEffect(() => {
+    setGameEngine(new LetterGame(game));
   }, [game]);
+
+  useEffect(() => {
+    if (player?.currentWords) {
+      setWords(player.currentWords);
+    }
+  }, [player?.currentWords]);
 
   const fetchPlayer = async (id: string) => {
     try {
@@ -185,8 +160,20 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
       });
       
       if (result.data.getPlayer) {
-        setPlayer(result.data.getPlayer);
-        setWords(result.data.getPlayer.currentWords || []);
+        console.log('Fetched player data:', result.data.getPlayer);
+        const playerData = result.data.getPlayer;
+        setPlayer(playerData);
+        
+        // Ensure we're properly loading saved words
+        if (Array.isArray(playerData.currentWords)) {
+          console.log('Loading saved words:', playerData.currentWords);
+          setWords(playerData.currentWords);
+        } else {
+          console.log('No saved words found, initializing empty array');
+          setWords([]);
+        }
+        
+        setIsHost(playerData.isHost);
       }
     } catch (error) {
       console.error('Error fetching player:', error);
@@ -228,61 +215,38 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
     }
   };
 
-  const generateLetters = () => {
-    // Ensure we're using the current settings for lettersPerRound
-    const currentSettings = game.settings ? JSON.parse(game.settings) : settings;
-    let result = '';
-    for (let i = 0; i < currentSettings.lettersPerRound; i++) {
-      result += LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
-    }
-    console.log('Generating letters with settings:', currentSettings);
-    return result;
-  };
-
   const startRound = async () => {
-    const newLetters = generateLetters();
-    
     try {
-      // Ensure we have the latest settings
-      const currentSettings = game.settings ? JSON.parse(game.settings) : settings;
+      // Ensure we're using the current settings from the game state
+      const currentSettings = JSON.parse(game.settings);
       
-      console.log('Starting round with settings:', currentSettings);
-      
+      const newLetters = Array(currentSettings.lettersPerRound)
+        .fill('')
+        .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
+        .join('');
+
       const result = await client.graphql({
         query: updateGame,
         variables: {
           input: {
             id: game.id,
-            currentLetters: newLetters,
+            status: GameStatus.PLAYING,
+            currentRound: game.currentRound + 1,
             timeRemaining: currentSettings.timePerRound,
-            status: 'PLAYING',
-            roundStartTime: new Date().toISOString(),
-            settings: JSON.stringify(currentSettings),
-            maxRounds: currentSettings.maxRounds
+            currentLetters: newLetters,
+            settings: game.settings // Preserve the current settings
           }
         }
       });
-      
-      // Update local state with the new settings
-      setSettings(currentSettings);
-      onGameUpdate(result.data.updateGame);
-      setLetters(newLetters);
-      setTimeLeft(currentSettings.timePerRound);
-      setIsPlaying(true);
+
       setWords([]);
-      
-      // Reset player words
-      if (player) {
-        await client.graphql({
-          query: updatePlayer,
-          variables: {
-            input: {
-              id: player.id,
-              currentWords: []
-            }
-          }
-        });
-      }
+      setWord('');
+      setLetters(newLetters);
+      setIsPlaying(true);
+      setTimeLeft(currentSettings.timePerRound);
+      setSettings(currentSettings); // Update local settings state
+
+      onGameUpdate(result.data.updateGame);
     } catch (error) {
       console.error('Error starting round:', error);
     }
@@ -290,65 +254,84 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
 
   const handleWordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!word.trim() || !player) return;
-
-    // Add minimum word length check
-    if (word.length < settings.minWordLength) {
+    if (!word.trim() || !gameEngine) return;
+  
+    const cleanWord = word.trim().toUpperCase();
+  
+    // Basic validation before sending to server
+    if (cleanWord.length < settings.minWordLength) {
       setError(`Word must be at least ${settings.minWordLength} letters long`);
       return;
     }
-
-    // Check if the letters appear in the correct order
-    const lettersArray = letters.split('');
-    let currentIndex = 0;
-    let isValid = true;
-    let lastFoundIndex = -1;
-
-    // Check each letter in sequence
-    for (const letter of lettersArray) {
-      const foundIndex = word.indexOf(letter, lastFoundIndex + 1);
-      if (foundIndex === -1 || foundIndex < lastFoundIndex) {
-        isValid = false;
-        break;
-      }
-      lastFoundIndex = foundIndex;
-    }
-
-    if (!isValid) {
-      // Word doesn't contain the letters in the correct order
-      setError('Word must contain the letters in the correct order');
+  
+    // Check if word was already submitted
+    if (words.includes(cleanWord)) {
+      setError('You already found this word!');
       return;
     }
-
-    const newWords = [...words, word.trim()];
-    setWords(newWords);
-    setWord('');
-
+  
     try {
-      await client.graphql({
-        query: updatePlayer,
-        variables: {
-          input: {
-            id: player.id,
-            currentWords: newWords
-          }
-        }
+      // First validate the move locally
+      if (!gameEngine.validateMove({ playerId: player.id, value: cleanWord })) {
+        setError(`Invalid word. Must contain letters "${letters}" in order`);
+        return;
+      }
+  
+      // Validate against dictionary API
+      const response = await fetch('/api/validate-words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words: [cleanWord] }),
       });
+  
+      const [isValid] = await response.json();
+      
+      if (isValid) {
+        const updatedWords = [...words, cleanWord];
+        
+        // Calculate score
+        const moves = updatedWords.map(w => ({
+          playerId: player.id,
+          value: w,
+          timestamp: Date.now()
+        }));
+        const newScore = gameEngine.calculateScore(moves);
+        
+        // Update player in database
+        const updateResult = await client.graphql({
+          query: updatePlayer,
+          variables: {
+            input: {
+              id: player.id,
+              currentWords: updatedWords,
+              score: newScore
+            }
+          }
+        });
+        
+        console.log('Word submission update:', {
+          word: cleanWord,
+          updatedWords,
+          newScore,
+          updateResult
+        });
+  
+        // Update local state
+        setWords(updatedWords);
+        setWord('');
+        setError(null);
+      } else {
+        setError('Word not found in dictionary');
+      }
     } catch (error) {
-      console.error('Error updating player words:', error);
+      console.error('Error submitting word:', error);
+      setError('Failed to submit word. Please try again.');
     }
   };
 
-  const handleSettingsUpdate = async (newSettings: LetterPairSettings) => {
+  const handleSettingsUpdate = async (newSettings: LetterRaceSettings) => {
     try {
-      // Validate settings before updating
-      const validation = validateGameSettings(newSettings, GameType.LETTER_PAIR);
-      if (!validation.isValid) {
-        console.error('Invalid settings:', validation.errors);
-        return;
-      }
-
-      const result = await client.graphql({
+      await client.graphql({
         query: updateGame,
         variables: {
           input: {
@@ -359,9 +342,7 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
           }
         }
       });
-      
       setSettings(newSettings);
-      onGameUpdate(result.data.updateGame);
     } catch (error) {
       console.error('Error updating settings:', error);
     }
@@ -370,20 +351,95 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
   const handleNextRound = async () => {
     try {
       const nextRound = game.currentRound + 1;
+      
+      // Generate new letters for the next round
+      const newLetters = Array(settings.lettersPerRound)
+        .fill('')
+        .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
+        .join('');
+      
+      // Update game status and round
       const result = await client.graphql({
         query: updateGame,
         variables: {
           input: {
             id: game.id,
-            status: 'PLAYING',
+            status: GameStatus.PLAYING,
             currentRound: nextRound,
-            timeRemaining: settings.timePerRound
+            timeRemaining: settings.timePerRound,
+            currentLetters: newLetters,
+            settings: JSON.stringify(settings)
           }
         }
       });
+      
+      // Update local state AFTER game update is successful
       onGameUpdate(result.data.updateGame);
+      setIsPlaying(true);
+      setTimeLeft(settings.timePerRound);
+      setLetters(newLetters);
+      
+      // Reset words LAST, after all other state updates
+      setWords([]);
+      setWord('');
+      
     } catch (error) {
       console.error('Error starting next round:', error);
+    }
+  };
+
+  const endRound = async () => {
+    try {
+      if (!player) {
+        console.error('Player not initialized');
+        return;
+      }
+
+      // Use the ref instead of the state
+      const currentWords = [...wordsRef.current];
+      console.log('Current words before ending round:', currentWords);
+
+      // Format moves properly for score calculation
+      const moves = currentWords.map(word => ({
+        playerId: player.id,
+        value: word,
+        timestamp: Date.now()
+      }));
+
+      // Calculate final score for the round using current words
+      const roundScore = gameEngine?.calculateScore(moves) || 0;
+      console.log('Final round score:', roundScore);
+
+      // Update player's final state for the round
+      const updateResult = await client.graphql({
+        query: updatePlayer,
+        variables: {
+          input: {
+            id: player.id,
+            currentWords: currentWords,
+            score: roundScore
+          }
+        }
+      });
+
+      console.log('Player update result:', updateResult);
+      
+      // Update game state
+      const result = await client.graphql({
+        query: updateGame,
+        variables: {
+          input: {
+            id: game.id,
+            status: isLastRound ? GameStatus.FINISHED : GameStatus.ROUND_END,
+            timeRemaining: 0
+          }
+        }
+      });
+
+      console.log('Game update result:', result);
+      onGameUpdate(result.data.updateGame);
+    } catch (error) {
+      console.error('Error ending round:', error);
     }
   };
 
@@ -401,12 +457,7 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
 
       {game.status === 'LOBBY' && (
         <>
-          <GameSettings
-            gameType={game.gameType}
-            settings={settings}
-            onUpdateSettings={handleSettingsUpdate}
-            isHost={isHost}
-          />
+     
           <Lobby
             game={game}
             player={player}
@@ -522,19 +573,39 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
           <form onSubmit={handleWordSubmit}>
             <TextField
               fullWidth
-              label={`Enter word (min ${settings.minWordLength} letters)`}
+              label={`Enter word using letters: ${letters}`}
               value={word}
               onChange={(e) => {
-                setWord(e.target.value.toUpperCase());
+                // Only allow letters
+                const input = e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase();
+                setWord(input);
                 setError(null);
               }}
               variant="outlined"
               autoComplete="off"
               disabled={!isPlaying}
               error={!!error}
-              helperText={error}
+              helperText={error || `Word must be at least ${settings.minWordLength} letters and contain the letters in order`}
               sx={{ mb: 3 }}
+              InputProps={{
+                onKeyDown: (e) => {
+                  // Prevent spaces in the input
+                  if (e.key === ' ') {
+                    e.preventDefault();
+                  }
+                }
+              }}
             />
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              disabled={!isPlaying || !word || word.length < settings.minWordLength}
+              onClick={handleWordSubmit}
+              fullWidth
+            >
+              Submit Word
+            </Button>
           </form>
 
           <Paper 
@@ -591,14 +662,218 @@ export default function LetterGame({ game, onGameUpdate }: LetterGameProps) {
       )}
 
       {game.status === 'FINISHED' && (
-        <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h4" gutterBottom align="center">
-            Game Over!
-          </Typography>
-          <Typography variant="h6" align="center">
-            Final Round: {settings.maxRounds}
-          </Typography>
-          {/* Add final scores display here */}
+        <Paper 
+          elevation={3} 
+          sx={{ 
+            p: 4,
+            mb: 3,
+            background: 'linear-gradient(145deg, #1a1a1a 0%, #2a2a2a 100%)',
+            border: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
+          <Box sx={{ textAlign: 'center', mb: 4 }}>
+            <Typography 
+              variant="h3" 
+              gutterBottom 
+              sx={{ 
+                color: 'primary.main',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 2
+              }}
+            >
+              <TrophyIcon fontSize="large" />
+              Game Over!
+              <TrophyIcon fontSize="large" />
+            </Typography>
+          </Box>
+
+          {/* Podium for top 3 */}
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center',
+            alignItems: 'flex-end',
+            gap: 2,
+            mb: 6,
+            mt: 4,
+            height: 200
+          }}>
+            {/* Second Place */}
+            {players[1] && (
+              <Box sx={{ 
+                width: 200,
+                height: '70%',
+                bgcolor: 'grey.300',
+                borderRadius: '8px 8px 0 0',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                pt: 2
+              }}>
+                <Box sx={{
+                  bgcolor: 'background.paper',
+                  borderRadius: '50%',
+                  width: 60,
+                  height: 60,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                  mb: 1
+                }}>
+                  <Typography variant="h4">🥈</Typography>
+                </Box>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  {players[1].name}
+                </Typography>
+                <Typography variant="body1" sx={{ color: 'text.secondary' }}>
+                  {players[1].score} pts
+                </Typography>
+              </Box>
+            )}
+
+            {/* First Place */}
+            {players[0] && (
+              <Box sx={{ 
+                width: 200,
+                height: '100%',
+                bgcolor: 'warning.light',
+                borderRadius: '8px 8px 0 0',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                pt: 2
+              }}>
+                <Box sx={{
+                  bgcolor: 'background.paper',
+                  borderRadius: '50%',
+                  width: 70,
+                  height: 70,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 3px 10px rgba(0,0,0,0.3)',
+                  mb: 1
+                }}>
+                  <Typography variant="h3">👑</Typography>
+                </Box>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {players[0].name}
+                </Typography>
+                <Typography variant="h6" sx={{ color: 'warning.dark' }}>
+                  {players[0].score} pts
+                </Typography>
+              </Box>
+            )}
+
+            {/* Third Place */}
+            {players[2] && (
+              <Box sx={{ 
+                width: 200,
+                height: '50%',
+                bgcolor: '#CD7F32',
+                borderRadius: '8px 8px 0 0',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                pt: 2
+              }}>
+                <Box sx={{
+                  bgcolor: 'background.paper',
+                  borderRadius: '50%',
+                  width: 50,
+                  height: 50,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                  mb: 1
+                }}>
+                  <Typography variant="h4">🥉</Typography>
+                </Box>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  {players[2].name}
+                </Typography>
+                <Typography variant="body1" sx={{ color: 'text.secondary' }}>
+                  {players[2].score} pts
+                </Typography>
+              </Box>
+            )}
+          </Box>
+
+          {/* Remaining Players */}
+          {players.length > 3 && (
+            <List sx={{ mb: 4 }}>
+              {players.slice(3).map((player, index) => (
+                <ListItem 
+                  key={player.id}
+                  sx={{
+                    mb: 2,
+                    bgcolor: 'background.paper',
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    transition: 'transform 0.2s',
+                    '&:hover': {
+                      transform: 'translateX(8px)'
+                    }
+                  }}
+                >
+                  <Avatar 
+                    sx={{ 
+                      mr: 2,
+                      bgcolor: 'primary.main',
+                      width: 40,
+                      height: 40
+                    }}
+                  >
+                    {index + 4}
+                  </Avatar>
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>
+                          {player.name}
+                        </Typography>
+                        <Chip 
+                          label={`${player.score} pts`}
+                          color="primary"
+                          sx={{ fontWeight: 600 }}
+                        />
+                      </Box>
+                    }
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => window.location.href = '/'}
+            fullWidth
+            size="large"
+            startIcon={<HomeIcon />}
+            sx={{ 
+              mt: 2,
+              py: 2,
+              fontSize: '1.1rem',
+              fontWeight: 600,
+              borderRadius: 2,
+              background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
+              boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
+              transition: 'transform 0.2s',
+              '&:hover': {
+                transform: 'scale(1.02)'
+              }
+            }}
+          >
+            Back to Home
+          </Button>
         </Paper>
       )}
     </Container>

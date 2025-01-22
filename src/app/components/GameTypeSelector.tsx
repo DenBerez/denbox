@@ -1,119 +1,61 @@
 import {
   Box,
-  Paper,
   Typography,
   Grid,
-  Card,
-  CardContent,
-  CardActionArea,
-  CardMedia,
+  Paper,
+  Button,
 } from '@mui/material';
-import { TextFields as LetterGameIcon, Timer as SpeedGameIcon } from '@mui/icons-material';
-import { letterPairDefaults, speedWordsDefaults } from '@/constants/gameSettings';
-
-interface GameType {
-    id: string;
-    title: string;
-    description: string;
-    tutorial: string;
-    icon: React.ReactNode;
-    defaultSettings: GameSettings;
-  }
-
-  interface GameSettings {
-    maxRounds: number;
-    timePerRound: number;
-    minPlayers: number;
-    maxPlayers: number;
-    minWordLength: number;
-    lettersPerRound: number;
-    // Add other common settings
-  }
-  
-  interface BaseGame {
-    id: string;
-    type: GameType;
-    name: string;
-    description: string;
-    tutorial: string;
-    icon: React.ReactNode;
-    defaultSettings: GameSettings;
-    component: React.ComponentType<GameProps>;
-  }
-  
-  interface GameProps {
-    game: any;
-    player: any;
-    onGameUpdate: (updatedGame: any) => void;
-    settings: GameSettings;
-  }
-
-const gameTypes: GameType[] = [
-  {
-    id: 'LETTER_RACE',
-    title: 'Letter Race',
-    description: 'Find words containing specific letters in order',
-    tutorial: 'You will be given letters. Find words that contain these letters in order. For example, if the letters are "STR", valid words include "STAR", "SISTER", and "MASTER".',
-    icon: <LetterGameIcon sx={{ fontSize: 60 }} />,
-    defaultSettings: letterPairDefaults,
-  },
-  {
-    id: 'SPEED_WORDS',
-    title: 'Speed Words',
-    description: 'Coming soon - Race to type words matching specific criteria',
-    icon: <SpeedGameIcon sx={{ fontSize: 60 }} />,
-    defaultSettings: speedWordsDefaults,
-    tutorial: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-  },
-  // Add more game types here
-];
+import { TextFields as LetterGameIcon } from '@mui/icons-material';
+import { GAME_CONFIGS } from '@/constants/gameSettings';
+import { GameType, GameTypeConfig } from '@/types/game';
+import React from 'react';
 
 interface GameTypeSelectorProps {
-  onSelectGameType: (gameType: GameType) => void;
+  onSelectGameType: (gameType: GameTypeConfig) => void;
 }
 
 export default function GameTypeSelector({ onSelectGameType }: GameTypeSelectorProps) {
-  const handleSelect = (gameType: GameType) => {
-    onSelectGameType(gameType);
-  };
+  const gameTypes = Object.values(GAME_CONFIGS);
 
   return (
-    <Box sx={{ width: '100%' }}>
-      <Typography variant="h4" gutterBottom align="center">
+    <Box>
+      <Typography variant="h4" gutterBottom sx={{ mb: 4 }}>
         Select Game Type
       </Typography>
+      
       <Grid container spacing={3}>
         {gameTypes.map((gameType) => (
-          <Grid item xs={12} sm={6} key={gameType.id}>
-            <Card 
+          <Grid item xs={12} md={6} key={gameType.id}>
+            <Paper 
+              elevation={3}
               sx={{ 
-                height: '100%',
-                opacity: gameType.id === 'SPEED_WORDS' ? 0.7 : 1,
+                p: 3,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 6,
+                  bgcolor: 'action.hover'
+                },
+                '&:active': {
+                  transform: 'translateY(0)',
+                  boxShadow: 2
+                }
               }}
+              onClick={() => onSelectGameType(gameType)}
             >
-              <CardActionArea 
-                onClick={() => gameType.id !== 'SPEED_WORDS' && handleSelect(gameType)}
-                sx={{ height: '100%' }}
-                disabled={gameType.id === 'SPEED_WORDS'}
-              >
-                <CardContent>
-                  <Box sx={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    alignItems: 'center',
-                    gap: 2,
-                  }}>
-                    {gameType.icon}
-                    <Typography variant="h5" component="div">
-                      {gameType.title}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" align="center">
-                      {gameType.description}
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </CardActionArea>
-            </Card>
+              {gameType.icon && (
+                <Box sx={{ mb: 2 }}>
+                  {React.createElement(gameType.icon)}
+                </Box>
+              )}
+              <Typography variant="h5" gutterBottom>
+                {gameType.title}
+              </Typography>
+              <Typography variant="body1" color="text.secondary">
+                {gameType.description}
+              </Typography>
+            </Paper>
           </Grid>
         ))}
       </Grid>

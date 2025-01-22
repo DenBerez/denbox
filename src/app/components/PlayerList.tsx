@@ -1,24 +1,17 @@
-import { Box, List, ListItem, ListItemText, Typography, Paper, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
+import { Box, List, ListItem, ListItemText, Typography, Paper, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Fade } from '@mui/material';
 import { Edit as EditIcon } from '@mui/icons-material';
 import { useEffect, useState } from 'react';
 import { generateClient } from 'aws-amplify/api';
 import { playersByGameId } from '@/graphql/queries';
 import { updatePlayer } from '@/graphql/mutations';
 import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
+import { Player } from '@/types/game';
 
 const client = generateClient();
 
 interface PlayerListProps {
   gameId: string;
-  currentPlayer: any;
-}
-
-// Add Player interface
-interface Player {
-  id: string;
-  name: string;
-  isHost: boolean;
-  gameId: string;
+  currentPlayer: Player;
 }
 
 interface EditDialogProps {
@@ -47,7 +40,26 @@ function EditNameDialog({ open, onClose, player, onSave }: EditDialogProps) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      TransitionComponent={Fade}
+      TransitionProps={{
+        timeout: 300
+      }}
+      sx={{
+        '& .MuiBackdrop-root': {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)'
+        },
+        '& .MuiDialog-paper': {
+          position: 'fixed',
+          margin: 0,
+          maxWidth: '500px',
+          width: '90%'
+        }
+      }}
+      keepMounted
+    >
       <DialogTitle>Edit Player Name</DialogTitle>
       <DialogContent>
         <TextField
@@ -73,7 +85,6 @@ function EditNameDialog({ open, onClose, player, onSave }: EditDialogProps) {
 }
 
 export default function PlayerList({ gameId, currentPlayer }: PlayerListProps) {
-  // Update state type
   const [players, setPlayers] = useState<Player[]>([]);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
 
@@ -173,6 +184,7 @@ export default function PlayerList({ gameId, currentPlayer }: PlayerListProps) {
             }
             sx={{
               borderRadius: 1,
+              minHeight: '60px',
               '&:hover': {
                 bgcolor: 'background.default'
               }

@@ -10,69 +10,23 @@ import {
 } from '@mui/material';
 import { generateClient } from 'aws-amplify/api';
 import { updateGame } from '@/graphql/mutations';
-import { validateGameStart, validateGameSettings } from '@/utils/gameValidation';
+import { validateGameStart } from '@/utils/gameValidation';
 import GameSettings from './GameSettings';
 import PlayerList from './PlayerList';
 import { getDefaultSettings } from '@/constants/gameSettings';
+import { Game, GameType, Player } from '@/types/game';
+import { LetterRaceSettings } from '@/types/settings';
+import { LetterGame } from '@/lib/games/LetterGame';
 
 const client = generateClient();
 
 interface LobbyProps {
-  game: any;
-  player: any;
-  players: any[];
+  game: Game;
+  player: Player;
+  players: Player[];
   onStartGame: () => void;
-  settings: LetterGameSettings;
+  settings: LetterRaceSettings;
 }
-
-interface GameTypeInfo {
-  id: string;
-  title: string;
-  description: string;
-  tutorial: string;
-  icon: React.ReactNode;
-  maxRounds: number;
-  defaultSettings: {
-    maxRounds: number;
-    timePerRound: number;
-    minPlayers: number;
-    maxPlayers: number;
-    [key: string]: any;
-  };
-}
-
-const gameTypes: GameTypeInfo[] = [
-  {
-    id: 'LETTER_PAIR',
-    title: 'Letter Pairs',
-    description: 'Find words containing specific letter pairs in order',
-    tutorial: 'You will be given two letters. Find words that contain these letters in order. For example, if the letters are "ST", valid words include "STOP", "FAST", and "MASTER".',
-    icon: null,
-    maxRounds: 3,
-    defaultSettings: {
-      maxRounds: 3,
-      timePerRound: 60,
-      minPlayers: 2,
-      maxPlayers: 8,
-      minWordLength: 4,
-      lettersPerRound: 2
-    },
-  },
-  {
-    id: 'SPEED_WORDS',
-    title: 'Speed Words',
-    description: 'Race to type words matching specific criteria',
-    tutorial: 'Type words as quickly as possible that match the given criteria. The faster you type correct words, the more points you earn!',
-    icon: null,
-    maxRounds: 3,
-    defaultSettings: {
-      maxRounds: 3,
-      timePerRound: 30,
-      minPlayers: 2,
-      maxPlayers: 4,
-    },
-  },
-];
 
 export default function Lobby({ game, player, players, onStartGame, settings }: LobbyProps) {
   const [error, setError] = useState<string | null>(null);
@@ -89,10 +43,7 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
     return getDefaultSettings(game.gameType);
   });
 
-  // Find the selected game type info
-  const selectedGameType = gameTypes.find(type => type.id === game.gameType);
-
-  const handleUpdateSettings = async (newSettings: any) => {
+  const handleUpdateSettings = async (newSettings: LetterRaceSettings) => {
     setLocalSettings(newSettings);
     try {
       await client.graphql({
@@ -119,36 +70,14 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
 
     setLoading(true);
     try {
-      const settingsValidation = validateGameSettings(localSettings, game.gameType);
-      if (!settingsValidation.isValid) {
-        setError(settingsValidation.errors[0]);
-        setLoading(false);
-        return;
-      }
-
       const playerValidation = validateGameStart(players, localSettings);
       if (!playerValidation.isValid) {
-        setError(playerValidation.errors[0]);
-        setLoading(false);
+        setError(playerValidation.error);
         return;
       }
 
-      const settingsResult = await client.graphql({
-        query: updateGame,
-        variables: {
-          input: {
-            id: game.id,
-            settings: JSON.stringify(localSettings),
-            maxRounds: localSettings.maxRounds,
-            timeRemaining: localSettings.timePerRound
-          }
-        }
-      });
-
-      if (settingsResult.data.updateGame) {
-        setError(null);
-        onStartGame();
-      }
+      onStartGame();
+      setError(null);
     } catch (error) {
       console.error('Error starting game:', error);
       setError('Failed to start game');
@@ -158,7 +87,7 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, px: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, }}>
       <PlayerList 
         gameId={game.id} 
         currentPlayer={player}

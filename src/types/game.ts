@@ -7,16 +7,7 @@ export enum GameStatus {
 }
 
 export enum GameType {
-  LETTER_RACE = 'LETTER_RACE',
-  SPEED_WORDS = 'SPEED_WORDS'
-}
-
-export interface GameSettings {
-  maxRounds: number;
-  timePerRound: number;
-  minPlayers: number;
-  maxPlayers: number;
-  [key: string]: any; // Allow for game-specific settings
+  LETTER_RACE = 'LETTER_RACE'
 }
 
 export interface Game {
@@ -26,8 +17,27 @@ export interface Game {
   hostId: string;
   currentRound: number;
   maxRounds: number;
-  gameType?: GameType;
-  settings?: string; // JSON string of GameSettings
+  gameType: GameType;
+  settings?: string;
   timeRemaining?: number;
   roundStartTime?: string;
+  currentLetters?: string;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  isHost: boolean;
+  gameId: string;
+  currentWords?: string[];
+  score?: number;
+}
+
+export interface GameTypeConfig {
+  id: GameType;
+  title: string;
+  description: string;
+  tutorial: string;
+  icon: any;
+  defaultSettings: GameSettings;
 } 

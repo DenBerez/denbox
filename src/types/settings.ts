@@ -1,3 +1,7 @@
+export enum GameType {
+  LETTER_RACE = 'LETTER_RACE'
+}
+
 export interface BaseGameSettings {
     maxRounds: number;
     timePerRound: number;
@@ -10,8 +14,7 @@ export interface BaseGameSettings {
     lettersPerRound: number;
   }
   
-  export interface SpeedWordsSettings extends BaseGameSettings {
-    // Add any specific settings for SpeedWords game type
-  }
+  // Remove until implemented
+  // export interface SpeedWordsSettings extends BaseGameSettings { ... }
   
-  export type GameSettings = LetterRaceSettings | SpeedWordsSettings;
+  export type GameSettings = LetterRaceSettings;

@@ -7,7 +7,7 @@ import { getGame } from '@/graphql/queries';
 import { updateGame } from '@/graphql/mutations';
 import { onUpdateGame } from '@/graphql/subscriptions';
 import GameTypeSelector from '@/app/components/GameTypeSelector';
-import LetterGame from '@/app/components/LetterGame';
+import LetterGameComponent from '@/app/components/LetterGame';
 import { GameStatus } from '@/types/game';
 import { use } from 'react';
 
@@ -65,9 +65,14 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
   const handleGameTypeSelect = async (gameType: any) => {
     try {
-      // Parse the default settings for this game type
+      // Get the default settings from the gameType object
       const settings = gameType.defaultSettings;
       
+      if (!settings) {
+        console.error('Default settings not found for game type:', gameType);
+        return;
+      }
+
       const result = await client.graphql({
         query: updateGame,
         variables: {
@@ -76,8 +81,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
             gameType: gameType.id,
             maxRounds: settings.maxRounds,
             status: GameStatus.LOBBY,
-            settings: JSON.stringify(settings),  // Properly stringify the settings object
-            timeRemaining: settings.timePerRound // Add the initial time remaining
+            settings: JSON.stringify(settings),
+            timeRemaining: settings.timePerRound
           }
         }
       });
@@ -104,7 +109,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
       {!game.gameType ? (
         <GameTypeSelector onSelectGameType={handleGameTypeSelect} />
       ) : (
-        <LetterGame 
+        <LetterGameComponent 
           game={game} 
           onGameUpdate={setGame} 
         />
