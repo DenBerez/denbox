@@ -12,11 +12,8 @@ const gameTypeInfo = {
   [GameType.LETTER_RACE]: {
     title: 'Letter Race',
     description: 'Find words containing specific letters in order'
-  },
-  [GameType.SPEED_WORDS]: {
-    title: 'Speed Words',
-    description: 'Race to type words matching specific criteria'
   }
+  // Remove SPEED_WORDS until implemented
 };
 
 export default function GameHeader({ game, showRoundInfo = false }: GameHeaderProps) {
