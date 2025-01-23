@@ -33,7 +33,6 @@ import Lobby from './Lobby';
 import PostRoundScreen from './PostRoundScreen';
 import PlayerNameInput from './PlayerNameInput';
 import GameTypeSelector from '@/app/components/GameTypeSelector';
-import { darkTheme } from '@/theme';
 import { LetterGame } from '@/lib/games/LetterGame';
 import { LetterRaceSettings } from '@/types/settings';
 import { letterRaceDefaults } from '@/constants/gameSettings';
