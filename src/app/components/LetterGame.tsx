@@ -236,9 +236,13 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       const result = await client.graphql({
         query: playersByGameId,
         variables: { gameId: game.id }
-      });
+      }) as GraphQLResult<{
+        playersByGameId: {
+          items: Player[];
+        };
+      }>;
       
-      if (result.data.playersByGameId.items) {
+      if (result.data?.playersByGameId.items) {
         setPlayers(result.data.playersByGameId.items);
       }
     } catch (error) {
