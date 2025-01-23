@@ -24,7 +24,7 @@ import { generateClient } from 'aws-amplify/api';
 import { updateGame, updatePlayer, createPlayer } from '@/graphql/mutations';
 import { getPlayer, getGame, playersByGameId } from '@/graphql/queries';
 import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
-import { GameStatus, GameType } from '@/types/game';
+import { GameStatus, GameType, Player } from '@/types/game';
 import { validateGameStart, validateGameSettings } from '@/utils/gameValidation';
 import PlayerList from './PlayerList';
 import GameHeader from './GameHeader';
