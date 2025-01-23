@@ -41,7 +41,6 @@ import {
   Home as HomeIcon 
 } from '@mui/icons-material';
 import { GraphQLResult } from '@aws-amplify/api';
-import { API } from 'aws-amplify';
 
 const client = generateClient();
 
