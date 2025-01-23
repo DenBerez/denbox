@@ -95,17 +95,14 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
   }, [words]);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: NodeJS.Timeout | undefined;
+    
     if (isPlaying && timeLeft > 0) {
-      // Clear any existing timer first
-      if (timer) clearInterval(timer);
-      
       timer = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
           if (newTime <= 0) {
-            clearInterval(timer);
-            // Remove isHost check so any player can trigger round end when their timer expires
+            if (timer) clearInterval(timer);
             endRound();
           }
           return Math.max(newTime, 0);
@@ -117,8 +114,6 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       if (timer) clearInterval(timer);
     };
   }, [isPlaying]);
-
-
 
   // Add debug logging
   useEffect(() => {
@@ -310,7 +305,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
 
   const handleWordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!word.trim() || !gameEngine) return;
+    if (!word.trim() || !gameEngine || !player) {
+      return;
+    }
 
     const cleanWord = word.trim().toUpperCase();
 
@@ -418,8 +415,8 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
 
   const endRound = async () => {
     try {
-      if (!player) {
-        console.error('Player not initialized');
+      if (!player || !gameEngine) {
+        console.error('Player or game engine not initialized');
         return;
       }
 
@@ -435,7 +432,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       }));
 
       // Calculate final score for the round using current words
-      const roundScore = gameEngine?.calculateScore(moves) || 0;
+      const roundScore = gameEngine.calculateScore(moves);
       console.log('Final round score:', roundScore);
 
       // Update player's final state for the round
@@ -445,7 +442,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
           input: {
             id: player.id,
             currentWords: currentWords,
-            score: roundScore
+            score: player.score + roundScore
           }
         }
       });
