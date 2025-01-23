@@ -26,6 +26,7 @@ import { updatePlayer } from '@/graphql/mutations';
 import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
 import { Player } from '@/types/game';
 import { paperStyles, scrollbarStyles, textGradientStyles, buttonStyles } from '@/constants/styles';
+import { graphqlWithRetry } from '@/utils/apiClient';
 
 const client = generateClient();
 
@@ -124,10 +125,7 @@ const PlayerList = ({ gameId, currentPlayer, onPlayersUpdate }: PlayerListProps)
     
     const fetchAndSetPlayers = async () => {
       try {
-        const result = await client.graphql({
-          query: playersByGameId,
-          variables: { gameId }
-        });
+        const result = await graphqlWithRetry(playersByGameId, { gameId });
         
         if (!isMounted) return;
         
@@ -136,25 +134,22 @@ const PlayerList = ({ gameId, currentPlayer, onPlayersUpdate }: PlayerListProps)
             .sort((a: Player, b: Player) => {
               return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
             });
-
+    
           const processedPlayers = sortedPlayers.map((player: Player, index: number) => ({
             ...player,
             isHost: index === 0
           }));
-
+    
           setPlayers(processedPlayers);
           onPlayersUpdate?.(processedPlayers);
-
+    
           // Update host status in database if needed
           const currentPlayerInList = processedPlayers.find(p => p.id === currentPlayer?.id);
           if (currentPlayerInList && currentPlayerInList.isHost !== currentPlayer.isHost) {
-            await client.graphql({
-              query: updatePlayer,
-              variables: {
-                input: {
-                  id: currentPlayer.id,
-                  isHost: currentPlayerInList.isHost
-                }
+            await graphqlWithRetry(updatePlayer, {
+              input: {
+                id: currentPlayer.id,
+                isHost: currentPlayerInList.isHost
               }
             });
           }

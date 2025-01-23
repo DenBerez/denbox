@@ -24,10 +24,15 @@ import AddIcon from '@mui/icons-material/Add';
 import GameTypeSelector from './components/GameTypeSelector';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
 
-// Configure Amplify with aws-exports
+// Configure Amplify with aws-exports and additional required settings
 Amplify.configure({
   ...awsconfig,
-  ssr: true
+  ssr: true,
+  Auth: {
+    mandatorySignIn: false,
+    identityPoolId: awsconfig.aws_cognito_identity_pool_id,
+    region: awsconfig.aws_project_region
+  }
 });
 
 const client = generateClient();

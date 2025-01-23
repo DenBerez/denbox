@@ -57,6 +57,7 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
   }, [player]);
 
   const handleUpdateSettings = async (newSettings: LetterRaceSettings) => {
+    setError(null);
     setLocalSettings(newSettings);
     try {
       await client.graphql({
@@ -72,6 +73,7 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
       });
     } catch (error) {
       console.error('Error updating settings:', error);
+      setError('Failed to update game settings');
     }
   };
 

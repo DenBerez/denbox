@@ -121,22 +121,6 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
   }, [isPlaying]);
 
 
-  // Update current player whenever players array changes
-  useEffect(() => {
-    const storedPlayerId = localStorage.getItem(`player_${game.id}`);
-    if (storedPlayerId && players.length > 0) {
-      const currentPlayer = players.find(p => p.id === storedPlayerId);
-      if (currentPlayer) {
-        setPlayer(currentPlayer);
-        setIsHost(currentPlayer.isHost);
-      } else {
-        // Only clear storage if we're sure the player doesn't exist
-        localStorage.removeItem(`player_${game.id}`);
-        setPlayer(null);
-        setIsHost(false);
-      }
-    }
-  }, [players, game.id]);
 
   // Add debug logging
   useEffect(() => {
@@ -294,13 +278,16 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
         .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
         .join('');
 
+      // If we're in LOBBY, start at round 1, otherwise increment
+      const nextRound = game.status === GameStatus.LOBBY ? 1 : game.currentRound + 1;
+
       const result = await client.graphql({
         query: updateGame,
         variables: {
           input: {
             id: game.id,
             status: GameStatus.PLAYING,
-            currentRound: game.currentRound + 1,
+            currentRound: nextRound,
             timeRemaining: currentSettings.timePerRound,
             currentLetters: newLetters,
             roundStartTime: new Date().toISOString()
@@ -326,74 +313,46 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
   const handleWordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!word.trim() || !gameEngine) return;
-  
+
     const cleanWord = word.trim().toUpperCase();
-  
+
     // Basic validation before sending to server
     if (cleanWord.length < settings.minWordLength) {
       setError(`Word must be at least ${settings.minWordLength} letters long`);
       return;
     }
-  
+
     // Check if word was already submitted
     if (words.includes(cleanWord)) {
       setError('You already found this word!');
       return;
     }
-  
+
     try {
-      // First validate the move locally
+      // Only validate the move locally
       if (!gameEngine.validateMove({ playerId: player.id, value: cleanWord })) {
         setError(`Invalid word. Must contain letters "${letters}" in order`);
         return;
       }
-  
-      // Validate against dictionary API
-      const response = await fetch('/api/validate-words', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ words: [cleanWord] }),
-      });
-  
-      const [isValid] = await response.json();
+
+      const updatedWords = [...words, cleanWord];
       
-      if (isValid) {
-        const updatedWords = [...words, cleanWord];
-        
-        // Calculate score
-        const moves = updatedWords.map(w => ({
-          playerId: player.id,
-          value: w,
-          timestamp: Date.now()
-        }));
-        const newScore = gameEngine.calculateScore(moves);
-        
-        // Update player in database
-        const updateResult = await client.graphql({
-          query: updatePlayer,
-          variables: {
-            input: {
-              id: player.id,
-              currentWords: updatedWords,
-              score: newScore
-            }
+      // Update player in database with new word
+      const updateResult = await client.graphql({
+        query: updatePlayer,
+        variables: {
+          input: {
+            id: player.id,
+            currentWords: updatedWords
           }
-        });
-        
-        console.log('Word submission update:', {
-          word: cleanWord,
-          updatedWords,
-          newScore,
-          updateResult
-        });
-  
-        // Update local state
-        setWords(updatedWords);
-        setWord('');
-        setError(null);
-      } else {
-        setError('Word not found in dictionary');
-      }
+        }
+      });
+      
+      // Update local state
+      setWords(updatedWords);
+      setWord('');
+      setError(null);
+      
     } catch (error) {
       console.error('Error submitting word:', error);
       setError('Failed to submit word. Please try again.');
@@ -516,6 +475,34 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
 
   // Parse settings from game
   const isLastRound = game.currentRound >= settings.maxRounds;
+
+  const returnToLobby = async () => {
+    try {
+      // Update game status to LOBBY while preserving settings and players
+      const result = await client.graphql({
+        query: updateGame,
+        variables: {
+          input: {
+            id: game.id,
+            status: GameStatus.LOBBY,
+            currentRound: 0,
+            timeRemaining: settings.timePerRound,
+            settings: JSON.stringify(settings)
+          }
+        }
+      });
+      
+      // Reset local game state
+      setIsPlaying(false);
+      setTimeLeft(settings.timePerRound);
+      setWords([]);
+      setWord('');
+      
+      onGameUpdate(result.data.updateGame);
+    } catch (error) {
+      console.error('Error returning to lobby:', error);
+    }
+  };
 
   if (!game.gameType) return null;
 
@@ -1009,29 +996,51 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             </List>
           )}
 
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => window.location.href = '/'}
-            fullWidth
-            size="large"
-            startIcon={<HomeIcon />}
-            sx={{ 
-              mt: 2,
-              py: 2,
-              fontSize: '1.1rem',
-              fontWeight: 600,
-              borderRadius: 2,
-              background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
-              boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
-              transition: 'transform 0.2s',
-              '&:hover': {
-                transform: 'scale(1.02)'
-              }
-            }}
-          >
-            Back to Home
-          </Button>
+          <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={returnToLobby}
+              fullWidth
+              size="large"
+              sx={{ 
+                py: 2,
+                fontSize: '1.1rem',
+                fontWeight: 600,
+                borderRadius: 2,
+                background: 'linear-gradient(45deg, #9c27b0 30%, #d500f9 90%)',
+                boxShadow: '0 3px 5px 2px rgba(156, 39, 176, .3)',
+                transition: 'transform 0.2s',
+                '&:hover': {
+                  transform: 'scale(1.02)'
+                }
+              }}
+            >
+              Return to Lobby
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => window.location.href = '/'}
+              fullWidth
+              size="large"
+              startIcon={<HomeIcon />}
+              sx={{ 
+                py: 2,
+                fontSize: '1.1rem',
+                fontWeight: 600,
+                borderRadius: 2,
+                background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
+                boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
+                transition: 'transform 0.2s',
+                '&:hover': {
+                  transform: 'scale(1.02)'
+                }
+              }}
+            >
+              Back to Home
+            </Button>
+          </Box>
         </Paper>
       )}
     </Container>

@@ -10,6 +10,7 @@ import GameTypeSelector from '@/app/components/GameTypeSelector';
 import LetterGameComponent from '@/app/components/LetterGame';
 import { Game, GameStatus } from '@/types/game';
 import { use } from 'react';
+import { graphqlWithRetry } from '@/utils/apiClient';
 
 const client = generateClient();
 
@@ -26,10 +27,7 @@ export default function GamePage({ params }: GamePageProps) {
   // Fetch game data
   const fetchGame = async () => {
     try {
-      const result = await client.graphql({
-        query: getGame,
-        variables: { id }
-      });
+      const result = await graphqlWithRetry(getGame, { id });
       setGame(result.data.getGame);
     } catch (error) {
       console.error('Error fetching game:', error);

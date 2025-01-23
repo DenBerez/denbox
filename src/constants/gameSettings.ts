@@ -14,7 +14,7 @@ import { TextFields as LetterIcon } from '@mui/icons-material';
 export const letterRaceDefaults: LetterRaceSettings = {
   maxRounds: 3,
   timePerRound: 60,
-  minPlayers: 2,
+  minPlayers: 1,
   maxPlayers: 8,
   minWordLength: 3,
   lettersPerRound: 2

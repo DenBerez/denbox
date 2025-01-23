@@ -19,8 +19,10 @@ import {
 } from '@mui/icons-material';
 import { generateClient } from 'aws-amplify/api';
 import { playersByGameId } from '@/graphql/queries';
+import { updatePlayer } from '@/graphql/mutations';
 import { Game, Player } from '@/types/game';
 import { paperStyles, textGradientStyles, buttonStyles, gradients } from '@/constants/styles';
+import { LetterGame } from '@/lib/games/LetterGame';
 
 const client = generateClient();
 
@@ -32,6 +34,12 @@ interface PostRoundScreenProps {
   isLastRound: boolean;
 }
 
+interface ValidatedPlayerData extends Player {
+  validWords: string[];
+  invalidWords: string[];
+  calculatedScore: number;
+}
+
 export default function PostRoundScreen({ 
   game, 
   player, 
@@ -39,7 +47,7 @@ export default function PostRoundScreen({
   settings, 
   isLastRound 
 }: PostRoundScreenProps) {
-  const [players, setPlayers] = useState<any[]>([]);
+  const [players, setPlayers] = useState<ValidatedPlayerData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,20 +58,60 @@ export default function PostRoundScreen({
         variables: { gameId: game.id }
       });
 
-      const processedPlayers = await Promise.all(
-        result.data.playersByGameId.items.map(async (player: any) => {
-          const moves = (player.currentWords || []).map((word: string) => ({
-            playerId: player.id,
-            value: word,
-            timestamp: Date.now()
-          }));
+      // Collect all unique words from all players
+      const allWords = new Set<string>();
+      result.data.playersByGameId.items.forEach((player: any) => {
+        (player.currentWords || []).forEach((word: string) => allWords.add(word.toUpperCase()));
+      });
 
-          return {
-            ...player,
-            calculatedScore: player.score
-          };
-        })
-      );
+      // Validate all unique words at once
+      const response = await fetch('/api/validate-words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words: Array.from(allWords) }),
+      });
+
+      const validWords = new Map<string, boolean>();
+      const validationResults = await response.json();
+      Array.from(allWords).forEach((word, index) => {
+        validWords.set(word, validationResults[index]);
+      });
+
+      // Process players with validated words
+      const processedPlayers = result.data.playersByGameId.items.map((player: any) => {
+        const currentWords = (player.currentWords || []).map(w => w.toUpperCase());
+        const validatedWords = currentWords.filter(word => validWords.get(word));
+        const invalidatedWords = currentWords.filter(word => !validWords.get(word));
+
+        // Calculate score based on validated words
+        const moves = validatedWords.map((word: string) => ({
+          playerId: player.id,
+          value: word,
+          timestamp: Date.now()
+        }));
+
+        const gameEngine = new LetterGame(game);
+        const calculatedScore = gameEngine.calculateScore(moves);
+
+        // Update player's score in database
+        client.graphql({
+          query: updatePlayer,
+          variables: {
+            input: {
+              id: player.id,
+              score: calculatedScore,
+              currentWords: validatedWords
+            }
+          }
+        });
+
+        return {
+          ...player,
+          validWords: validatedWords,
+          invalidWords: invalidatedWords,
+          calculatedScore
+        };
+      });
 
       setPlayers(processedPlayers);
       setLoading(false);
@@ -106,6 +154,49 @@ export default function PostRoundScreen({
   }
 
   const sortedPlayers = [...players].sort((a, b) => b.calculatedScore - a.calculatedScore);
+
+  // Modify the player list item to show valid and invalid words
+  const PlayerWordList = ({ player }: { player: ValidatedPlayerData }) => (
+    <Box sx={{ mt: 2 }}>
+      {player.validWords.length > 0 && (
+        <>
+          <Typography variant="subtitle2" color="success.main" sx={{ fontWeight: 600, mb: 1 }}>
+            Valid Words:
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+            {player.validWords.map((word) => (
+              <Chip
+                key={word}
+                label={word}
+                color="success"
+                size="small"
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </>
+      )}
+      
+      {player.invalidWords.length > 0 && (
+        <>
+          <Typography variant="subtitle2" color="error.main" sx={{ fontWeight: 600, mb: 1 }}>
+            Invalid Words:
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {player.invalidWords.map((word) => (
+              <Chip
+                key={word}
+                label={word}
+                color="error"
+                size="small"
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </>
+      )}
+    </Box>
+  );
 
   return (
     <Paper elevation={3} sx={{ ...paperStyles.gradient }}>
@@ -345,37 +436,30 @@ export default function PostRoundScreen({
                   key={player.id}
                   sx={{
                     mb: 2,
-                    ...paperStyles.default,
-                    transition: 'transform 0.2s',
-                    '&:hover': {
-                      transform: 'translateX(8px)'
-                    }
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    ...paperStyles.default
                   }}
                 >
-                  <Avatar 
-                    sx={{ 
-                      mr: 2,
-                      bgcolor: index === 0 ? 'warning.main' : 'primary.main',
-                      width: 40,
-                      height: 40
-                    }}
-                  >
-                    {index + 1}
-                  </Avatar>
-                  <ListItemText
-                    primary={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>
-                          {player.name}
-                        </Typography>
-                        <Chip 
-                          label={`${player.calculatedScore} pts`}
-                          color={index === 0 ? "warning" : "primary"}
-                          sx={{ fontWeight: 600 }}
-                        />
-                      </Box>
-                    }
-                  />
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Avatar 
+                      sx={{ 
+                        mr: 2,
+                        bgcolor: index === 0 ? 'warning.main' : 'primary.main'
+                      }}
+                    >
+                      {index + 1}
+                    </Avatar>
+                    <Typography variant="h6" sx={{ fontWeight: 600, flex: 1 }}>
+                      {player.name}
+                    </Typography>
+                    <Chip 
+                      label={`${player.calculatedScore} pts`}
+                      color={index === 0 ? "warning" : "primary"}
+                      sx={{ fontWeight: 600 }}
+                    />
+                  </Box>
+                  <PlayerWordList player={player} />
                 </ListItem>
               ))}
             </List>
