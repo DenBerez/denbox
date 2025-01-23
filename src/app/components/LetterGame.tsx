@@ -169,9 +169,13 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
         const existingPlayersResult = await client.graphql({
           query: playersByGameId,
           variables: { gameId: game.id }
-        });
+        }) as GraphQLResult<{
+          playersByGameId: {
+            items: Player[];
+          };
+        }>;
         
-        const existingPlayers = existingPlayersResult.data.playersByGameId.items || [];
+        const existingPlayers = existingPlayersResult.data?.playersByGameId.items || [];
         setPlayers(existingPlayers);
 
         // 2. Check for stored player ID
@@ -204,9 +208,11 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
                 gamePlayersId: game.id
               }
             }
-          });
+          }) as GraphQLResult<{
+            createPlayer: Player;
+          }>;
 
-          if (newPlayer.data.createPlayer) {
+          if (newPlayer.data?.createPlayer) {
             localStorage.setItem(`player_${game.id}`, newPlayer.data.createPlayer.id);
             setPlayer(newPlayer.data.createPlayer);
             setIsHost(isHost);
