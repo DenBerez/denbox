@@ -25,15 +25,10 @@ import GameTypeSelector from './components/GameTypeSelector';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
 
 // // Configure Amplify with aws-exports and additional required settings
-// Amplify.configure({
-//   ...awsconfig,
-//   ssr: true,
-//   Auth: {
-//     mandatorySignIn: false,
-//     identityPoolId: awsconfig.aws_cognito_identity_pool_id,
-//     region: awsconfig.aws_project_region
-//   }
-// });
+Amplify.configure({
+  ...awsconfig,
+
+});
 
 const client = generateClient();
 
