@@ -12,6 +12,11 @@ Amplify.configure({
       defaultAuthMode: 'apiKey',
       apiKey: awsconfig.aws_appsync_apiKey
     }
+  },
+  Auth: {
+    mandatorySignIn: false,
+    identityPoolId: awsconfig.aws_cognito_identity_pool_id,
+    region: awsconfig.aws_project_region
   }
 });
 
