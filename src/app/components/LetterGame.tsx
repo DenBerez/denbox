@@ -309,7 +309,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       setTimeLeft(currentSettings.timePerRound);
       setSettings(currentSettings);
 
-      onGameUpdate(result.data.updateGame);
+      onGameUpdate(result?.data?.updateGame);
     } catch (error) {
       console.error('Error starting round:', error);
       throw error;
@@ -338,7 +338,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
 
     try {
       // Only validate the move locally
-      if (!gameEngine.validateMove({ playerId: player.id, value: cleanWord })) {
+      if (!gameEngine.validateMove({ playerId: player?.id, value: cleanWord })) {
         setError(`Invalid word. Must contain letters "${letters}" in order`);
         return;
       }
