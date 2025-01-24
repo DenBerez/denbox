@@ -354,7 +354,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             currentWords: updatedWords
           }
         }
-      });
+      }) as GraphQLResult<{
+        updatePlayer: Player;
+      }>;
       
       // Update local state
       setWords(updatedWords);
@@ -409,7 +411,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             settings: JSON.stringify(settings)
           }
         }
-      });
+      }) as GraphQLResult<{
+        updateGame: Game;
+      }>;
       
       // Update local state AFTER game update is successful
       onGameUpdate(result.data.updateGame);
@@ -458,7 +462,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             score: player.score + roundScore
           }
         }
-      });
+      }) as GraphQLResult<{
+        updatePlayer: Player;
+      }>;
 
       console.log('Player update result:', updateResult);
       
@@ -472,7 +478,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             timeRemaining: 0
           }
         }
-      });
+      }) as GraphQLResult<{
+        updateGame: Game;
+      }>;
 
       console.log('Game update result:', result);
       onGameUpdate(result.data.updateGame);
@@ -498,7 +506,9 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             settings: JSON.stringify(settings)
           }
         }
-      });
+      }) as GraphQLResult<{
+        updateGame: Game;
+      }>;
       
       // Reset local game state
       setIsPlaying(false);
