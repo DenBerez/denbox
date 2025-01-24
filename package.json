@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "check:types": "tsc --noEmit",
     "build": "next build",
-    "build:no-types": "NODE_ENV=production next build",
+    "build:no-types": "SKIP_TYPE_CHECK=1 next build",
     "start": "next start",
     "lint": "next lint"
   },

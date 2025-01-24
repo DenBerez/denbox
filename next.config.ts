@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-}
+   // Add a TypeScript configuration to allow skipping type-checking during builds
+   typescript: {
+    // Ignore type errors during builds when the `SKIP_TYPE_CHECK` environment variable is set
+    ignoreBuildErrors: process.env.SKIP_TYPE_CHECK === "1",
+  },
+};
 
 export default nextConfig;
