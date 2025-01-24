@@ -263,8 +263,11 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             isConfirmed: true
           }
         }
-      });
-      setPlayer(result.data.updatePlayer);
+      }) as GraphQLResult<{
+        updatePlayer: Player;
+      }>;
+
+      setPlayer(result.data?.updatePlayer);
     } catch (error) {
       console.error('Error updating player name:', error);
     }
