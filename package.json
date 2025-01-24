@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:no-types": "next build --no-check",
+    "build:no-types": "NODE_ENV=production next build",
     "start": "next start",
     "lint": "next lint"
   },
