@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Container, CircularProgress, Box } from '@mui/material';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { getGame } from '@/graphql/queries';
 import { updateGame } from '@/graphql/mutations';
 import { onUpdateGame } from '@/graphql/subscriptions';
@@ -11,8 +11,6 @@ import LetterGameComponent from '@/app/components/LetterGame';
 import { Game, GameStatus } from '@/types/game';
 import { use } from 'react';
 import { graphqlWithRetry } from '@/utils/apiClient';
-
-const client = generateClient();
 
 interface GamePageProps {
   params: Promise<{ id: string }>;

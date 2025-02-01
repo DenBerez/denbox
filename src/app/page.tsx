@@ -23,14 +23,9 @@ import { useRouter } from 'next/navigation';
 import AddIcon from '@mui/icons-material/Add';
 import GameTypeSelector from './components/GameTypeSelector';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 
-// // Configure Amplify with aws-exports and additional required settings
-Amplify.configure({
-  ...awsconfig,
 
-});
-
-const client = generateClient();
 
 export default function Home() {
   const [gameCode, setGameCode] = useState('');
@@ -96,28 +91,24 @@ export default function Home() {
         
       const defaultSettings = getDefaultSettings(gameType.id);
 
-      console.log('Game code:', gameCode);
-      console.log('Game type:', gameType);
-      console.log('Default settings:', defaultSettings);
+      const input = {
+        id: gameCode,
+        code: gameCode,
+        gameType: gameType.id,
+        status: GameStatus.LOBBY,
+        settings: JSON.stringify(defaultSettings),
+        maxRounds: defaultSettings.maxRounds,
+        currentRound: 1,
+        timeRemaining: defaultSettings.timePerRound,
+        hostId: gameCode
+      }
 
       const result = await client.graphql({
         query: createGame,
         variables: {
-          input: {
-            id: gameCode,
-            code: gameCode,
-            gameType: gameType.id,
-            status: GameStatus.LOBBY,
-            settings: JSON.stringify(defaultSettings),
-            maxRounds: defaultSettings.maxRounds,
-            currentRound: 1,
-            timeRemaining: defaultSettings.timePerRound,
-            hostId: gameCode
-          }
-        }
+          input: input
+        },
       });
-
-      console.log('Game created:', result);
 
       if (result.data.createGame) {
         router.push(`/game/${gameCode}`);
@@ -127,8 +118,6 @@ export default function Home() {
     } catch (error) {
       console.error('Error creating game:', error);
       setError('Failed to create game');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -180,7 +169,10 @@ export default function Home() {
         </Box>
 
         {showGameTypeSelector ? (
-          <GameTypeSelector onSelectGameType={handleSelectGameType} />
+          <GameTypeSelector 
+            onSelectGameType={handleSelectGameType} 
+            loading={loading}
+          />
         ) : (
           <>
             <Paper sx={{ ...paperStyles.gradient }}>

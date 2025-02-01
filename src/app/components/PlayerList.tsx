@@ -20,15 +20,13 @@ import {
 } from '@mui/material';
 import { Edit as EditIcon } from '@mui/icons-material';
 import { useEffect, useState } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { playersByGameId } from '@/graphql/queries';
 import { updatePlayer } from '@/graphql/mutations';
 import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
 import { Player } from '@/types/game';
 import { paperStyles, scrollbarStyles, textGradientStyles, buttonStyles } from '@/constants/styles';
 import { graphqlWithRetry } from '@/utils/apiClient';
-
-const client = generateClient();
 
 // Add colorful avatar backgrounds
 const avatarColors = [

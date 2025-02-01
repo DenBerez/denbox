@@ -1,6 +1,5 @@
-
 import { GameSettings, GameType, GameStatus } from '@/types/game';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updateGame, updatePlayer } from '@/graphql/mutations';
 import { letterRaceDefaults } from '@/constants/gameSettings';
 
@@ -13,10 +12,6 @@ import { letterRaceDefaults } from '@/constants/gameSettings';
  * - Updates game state via AWS Amplify API
  * - Provides base structure for specific game implementations
  */
-
-
-
-const client = generateClient();
 
 export interface GameMove {
   playerId: string;

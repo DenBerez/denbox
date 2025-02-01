@@ -1,5 +1,5 @@
 import { Paper, Typography, Box } from '@mui/material';
-import { Game, GameType } from '@/types/game';
+import { Game, GameStatus, GameType } from '@/types/game';
 import Link from 'next/link';
 import { paperStyles, textGradientStyles, gradients } from '@/constants/styles';
 
@@ -78,7 +78,7 @@ export default function GameHeader({ game, showRoundInfo = false }: GameHeaderPr
               whiteSpace: 'nowrap'
             }}
           >
-            {game.status}
+            {game.status === GameStatus.ROUND_END ? 'Round End' : game.status}
           </Typography>
         </Box>
 

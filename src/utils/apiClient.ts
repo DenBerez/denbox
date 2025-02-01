@@ -1,12 +1,10 @@
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { GraphQLQuery } from '@aws-amplify/api';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-const client = generateClient();
 
 export async function graphqlWithRetry<T>(
   query: GraphQLQuery<T>, 

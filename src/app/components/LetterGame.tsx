@@ -20,7 +20,7 @@ import {
   Chip,
   Fade,
 } from '@mui/material';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updateGame, updatePlayer, createPlayer } from '@/graphql/mutations';
 import { getPlayer, getGame, playersByGameId } from '@/graphql/queries';
 import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
@@ -41,8 +41,7 @@ import {
   Home as HomeIcon 
 } from '@mui/icons-material';
 import { GraphQLResult } from '@aws-amplify/api';
-
-const client = generateClient();
+import { playSound, Sounds } from '@/utils/soundEffects';
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -101,6 +100,12 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       timer = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
+          
+          // Play warning sound at 10% remaining time
+          if (newTime === Math.floor(settings.timePerRound * 0.1)) {
+            playSound(Sounds.WARNING);
+          }
+          
           if (newTime <= 0) {
             if (timer) clearInterval(timer);
             endRound();
@@ -275,6 +280,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
 
   const startRound = async () => {
     try {
+      playSound(Sounds.START);
       // Ensure we're using the current settings from the game state
       const currentSettings = game.settings ? JSON.parse(game.settings) : settings;
       
@@ -435,6 +441,10 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       if (!player || !gameEngine) {
         console.error('Player or game engine not initialized');
         return;
+      }
+
+      if (isLastRound) {
+        playSound(Sounds.END);
       }
 
       // Use the ref instead of the state

@@ -18,6 +18,14 @@
               "userPoolConfig": {
                 "userPoolId": "authdenbox5904d2e9"
               }
+            },
+            {
+              "apiKeyConfig": {
+                "apiKeyExpirationDate": "2026-02-01T02:49:19.346Z",
+                "apiKeyExpirationDays": 365,
+                "description": "DenBox key?"
+              },
+              "authenticationType": "API_KEY"
             }
           ],
           "defaultAuthentication": {

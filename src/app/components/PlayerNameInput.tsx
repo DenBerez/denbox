@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { Box, TextField, Button, Paper, Typography } from '@mui/material';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updatePlayer } from '@/graphql/mutations';
 import { Player } from '@/types/game';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
 import { Edit as EditIcon } from '@mui/icons-material';
-
-const client = generateClient();
 
 interface PlayerNameInputProps {
   player: Player;

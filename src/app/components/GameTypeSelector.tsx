@@ -3,19 +3,27 @@ import {
   Typography,
   Grid,
   Paper,
+  CircularProgress,
 } from '@mui/material';
 import { TextFields as LetterGameIcon } from '@mui/icons-material';
 import { GAME_CONFIGS } from '@/constants/gameSettings';
 import { GameType, GameTypeConfig } from '@/types/game';
-import React from 'react';
+import React, { useState } from 'react';
 import { paperStyles, textGradientStyles } from '@/constants/styles';
 
 interface GameTypeSelectorProps {
   onSelectGameType: (gameType: GameTypeConfig) => void;
+  loading?: boolean;
 }
 
-export default function GameTypeSelector({ onSelectGameType }: GameTypeSelectorProps) {
+export default function GameTypeSelector({ onSelectGameType, loading = false }: GameTypeSelectorProps) {
+  const [selectedType, setSelectedType] = useState<string | null>(null);
   const gameTypes = Object.values(GAME_CONFIGS);
+
+  const handleGameTypeClick = (gameType: GameTypeConfig) => {
+    setSelectedType(gameType.id);
+    onSelectGameType(gameType);
+  };
 
   return (
     <Box>
@@ -39,21 +47,42 @@ export default function GameTypeSelector({ onSelectGameType }: GameTypeSelectorP
               sx={{ 
                 ...paperStyles.default,
                 p: 3,
-                cursor: 'pointer',
+                cursor: loading ? 'default' : 'pointer',
+                opacity: loading && selectedType !== gameType.id ? 0.5 : 1,
                 transition: 'all 0.2s ease-in-out',
                 '&:hover': {
-                  transform: 'translateY(-4px)',
-                  boxShadow: 6,
-                  borderColor: 'primary.main',
-                  bgcolor: 'rgba(33, 150, 243, 0.1)'
+                  transform: loading ? 'none' : 'translateY(-4px)',
+                  boxShadow: loading ? 2 : 6,
+                  borderColor: loading ? 'divider' : 'primary.main',
+                  bgcolor: loading ? 'transparent' : 'rgba(33, 150, 243, 0.1)'
                 },
                 '&:active': {
-                  transform: 'translateY(0)',
+                  transform: loading ? 'none' : 'translateY(0)',
                   boxShadow: 2
-                }
+                },
+                position: 'relative'
               }}
-              onClick={() => onSelectGameType(gameType)}
+              onClick={() => !loading && handleGameTypeClick(gameType)}
             >
+              {loading && selectedType === gameType.id && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: 'inherit',
+                    zIndex: 1
+                  }}
+                >
+                  <CircularProgress />
+                </Box>
+              )}
               {gameType.icon && (
                 <Box sx={{ 
                   mb: 2,

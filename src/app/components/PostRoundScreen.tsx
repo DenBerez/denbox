@@ -17,14 +17,12 @@ import {
   Celebration as CelebrationIcon,
   Home as HomeIcon 
 } from '@mui/icons-material';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { playersByGameId } from '@/graphql/queries';
 import { updatePlayer } from '@/graphql/mutations';
 import { Game, Player } from '@/types/game';
 import { paperStyles, textGradientStyles, buttonStyles, gradients } from '@/constants/styles';
 import { LetterGame } from '@/lib/games/LetterGame';
-
-const client = generateClient();
 
 interface PostRoundScreenProps {
   game: Game;

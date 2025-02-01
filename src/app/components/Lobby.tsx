@@ -8,7 +8,7 @@ import {
   Alert,
   CircularProgress,
 } from '@mui/material';
-import { generateClient } from 'aws-amplify/api';
+import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updateGame } from '@/graphql/mutations';
 import { validateGameStart } from '@/utils/gameValidation';
 import GameSettings from './GameSettings';
@@ -21,8 +21,6 @@ import GameSettingsDialog from './GameSettingsDialog';
 import SettingsIcon from '@mui/icons-material/Settings';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
-
-const client = generateClient();
 
 interface LobbyProps {
   game: Game;

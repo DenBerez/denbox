@@ -1,11 +1,4 @@
-try {
-  require('@/config/amplify');
-} catch (error) {
-  console.error('Error initializing Amplify:', error);
-  // Handle initialization error appropriately
-}
 
-import '@/config/amplify';
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import ThemeRegistry from '@/components/ThemeRegistry';
