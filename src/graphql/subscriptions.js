@@ -18,6 +18,7 @@ export const onUpdateGameById = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -54,6 +55,7 @@ export const onCreatePlayerByGameId = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -91,6 +93,7 @@ export const onUpdatePlayerByGameId = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -120,6 +123,7 @@ export const onCreateGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -148,6 +152,7 @@ export const onUpdateGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -176,6 +181,7 @@ export const onDeleteGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -212,6 +218,7 @@ export const onCreatePlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -249,6 +256,7 @@ export const onUpdatePlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -286,6 +294,7 @@ export const onDeletePlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -320,6 +329,7 @@ export const onCreateQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -354,6 +364,7 @@ export const onUpdateQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -388,6 +399,7 @@ export const onDeleteQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings

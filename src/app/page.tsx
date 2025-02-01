@@ -90,11 +90,12 @@ export default function Home() {
         .join('');
         
       const defaultSettings = getDefaultSettings(gameType.id);
+      console.log('Default settings:', defaultSettings);
 
       const input = {
         id: gameCode,
         code: gameCode,
-        gameType: gameType.id,
+        gameType: gameType,
         status: GameStatus.LOBBY,
         settings: JSON.stringify(defaultSettings),
         maxRounds: defaultSettings.maxRounds,
@@ -102,6 +103,8 @@ export default function Home() {
         timeRemaining: defaultSettings.timePerRound,
         hostId: gameCode
       }
+
+      console.log('Input:', input);
 
       const result = await client.graphql({
         query: createGame,

@@ -1,3 +1,5 @@
+import { GameSettings } from "./settings";
+
 export enum GameStatus {
   SETUP = 'SETUP',
   LOBBY = 'LOBBY',
@@ -7,7 +9,8 @@ export enum GameStatus {
 }
 
 export enum GameType {
-  LETTER_RACE = 'LETTER_RACE'
+  LETTER_RACE = 'LETTER_RACE',
+  PICTURE_GAME = 'PICTURE_GAME'
 }
 
 export interface Game {
@@ -22,6 +25,9 @@ export interface Game {
   timeRemaining?: number;
   roundStartTime?: string;
   currentLetters?: string;
+  currentWord?: string;
+  currentDrawer?: string;
+  currentDrawing?: string; // JSON stringified DrawingData
 }
 
 export interface Player {

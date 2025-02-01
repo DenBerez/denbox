@@ -1,122 +1,153 @@
+'use client';
+
+import { useState } from 'react';
 import {
   Box,
+  Paper,
   Typography,
   Grid,
-  Paper,
-  CircularProgress,
+  Card,
+  CardContent,
+  CardActionArea,
+  Button,
+  Fade
 } from '@mui/material';
-import { TextFields as LetterGameIcon } from '@mui/icons-material';
-import { GAME_CONFIGS } from '@/constants/gameSettings';
-import { GameType, GameTypeConfig } from '@/types/game';
-import React, { useState } from 'react';
+import {
+  Create as DrawIcon,
+  TextFields as LetterIcon
+} from '@mui/icons-material';
+import { GameType } from '@/types/game';
 import { paperStyles, textGradientStyles } from '@/constants/styles';
 
-interface GameTypeSelectorProps {
-  onSelectGameType: (gameType: GameTypeConfig) => void;
-  loading?: boolean;
+interface GameTypeOption {
+  type: GameType;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
 }
 
-export default function GameTypeSelector({ onSelectGameType, loading = false }: GameTypeSelectorProps) {
-  const [selectedType, setSelectedType] = useState<string | null>(null);
-  const gameTypes = Object.values(GAME_CONFIGS);
+const gameTypes: GameTypeOption[] = [
+  {
+    type: GameType.LETTER_RACE,
+    title: 'Letter Race',
+    description: 'Find words containing specific letters in order',
+    icon: <LetterIcon sx={{ fontSize: 40 }} />
+  },
+  {
+    type: GameType.PICTURE_GAME,
+    title: 'Picture Game',
+    description: 'Draw and guess pictures with your friends',
+    icon: <DrawIcon sx={{ fontSize: 40 }} />
+  }
+];
 
-  const handleGameTypeClick = (gameType: GameTypeConfig) => {
-    setSelectedType(gameType.id);
-    onSelectGameType(gameType);
+interface GameTypeSelectorProps {
+  onSelectGameType: (type: GameType) => void;
+}
+
+export default function GameTypeSelector({ onSelectGameType }: GameTypeSelectorProps) {
+  const [selected, setSelected] = useState<GameType | null>(null);
+
+  const handleSelect = (type: GameType) => {
+    setSelected(type);
+  };
+
+  const handleConfirm = () => {
+    if (selected) {
+      onSelectGameType(selected);
+    }
   };
 
   return (
-    <Box>
+    <Paper sx={{ ...paperStyles.gradient, p: 4 }}>
       <Typography 
-        variant="h4" 
-        gutterBottom 
+        variant="h3" 
+        align="center" 
         sx={{ 
-          mb: 4,
           ...textGradientStyles,
-          fontWeight: 700
+          mb: 4,
+          fontWeight: 700 
         }}
       >
-        Select Game Type
+        Choose Game Type
       </Typography>
-      
-      <Grid container spacing={3}>
+
+      <Grid container spacing={3} sx={{ mb: 4 }}>
         {gameTypes.map((gameType) => (
-          <Grid item xs={12} md={6} key={gameType.id}>
-            <Paper 
-              elevation={3}
+          <Grid item xs={12} sm={6} key={gameType.type}>
+            <Card 
               sx={{ 
-                ...paperStyles.default,
-                p: 3,
-                cursor: loading ? 'default' : 'pointer',
-                opacity: loading && selectedType !== gameType.id ? 0.5 : 1,
-                transition: 'all 0.2s ease-in-out',
+                height: '100%',
+                cursor: 'pointer',
+                transition: 'transform 0.2s',
+                transform: selected === gameType.type ? 'scale(1.02)' : 'none',
+                border: '2px solid',
+                borderColor: selected === gameType.type ? 'primary.main' : 'transparent',
                 '&:hover': {
-                  transform: loading ? 'none' : 'translateY(-4px)',
-                  boxShadow: loading ? 2 : 6,
-                  borderColor: loading ? 'divider' : 'primary.main',
-                  bgcolor: loading ? 'transparent' : 'rgba(33, 150, 243, 0.1)'
-                },
-                '&:active': {
-                  transform: loading ? 'none' : 'translateY(0)',
-                  boxShadow: 2
-                },
-                position: 'relative'
+                  transform: 'scale(1.02)',
+                }
               }}
-              onClick={() => !loading && handleGameTypeClick(gameType)}
             >
-              {loading && selectedType === gameType.id && (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    bgcolor: 'rgba(0, 0, 0, 0.3)',
-                    borderRadius: 'inherit',
-                    zIndex: 1
-                  }}
-                >
-                  <CircularProgress />
-                </Box>
-              )}
-              {gameType.icon && (
-                <Box sx={{ 
-                  mb: 2,
-                  color: 'primary.main',
-                  '& > svg': {
-                    fontSize: 40
-                  }
+              <CardActionArea 
+                onClick={() => handleSelect(gameType.type)}
+                sx={{ height: '100%' }}
+              >
+                <CardContent sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center',
+                  p: 4
                 }}>
-                  {React.createElement(gameType.icon)}
-                </Box>
-              )}
-              <Typography 
-                variant="h5" 
-                gutterBottom 
-                sx={{ 
-                  fontWeight: 600,
-                  color: 'primary.main'
-                }}
-              >
-                {gameType.title}
-              </Typography>
-              <Typography 
-                variant="body1" 
-                color="text.secondary"
-                sx={{
-                  lineHeight: 1.6
-                }}
-              >
-                {gameType.description}
-              </Typography>
-            </Paper>
+                  <Box sx={{ 
+                    color: 'primary.main',
+                    mb: 2
+                  }}>
+                    {gameType.icon}
+                  </Box>
+                  <Typography 
+                    variant="h5" 
+                    component="h2" 
+                    align="center"
+                    sx={{ 
+                      fontWeight: 600,
+                      mb: 2
+                    }}
+                  >
+                    {gameType.title}
+                  </Typography>
+                  <Typography 
+                    variant="body1" 
+                    color="text.secondary"
+                    align="center"
+                  >
+                    {gameType.description}
+                  </Typography>
+                </CardContent>
+              </CardActionArea>
+            </Card>
           </Grid>
         ))}
       </Grid>
-    </Box>
+
+      <Fade in={selected !== null}>
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          <Button
+            variant="contained"
+            size="large"
+            onClick={handleConfirm}
+            disabled={!selected}
+            sx={{
+              py: 2,
+              px: 6,
+              fontSize: '1.1rem',
+              fontWeight: 600,
+              borderRadius: 2,
+            }}
+          >
+            Start Game
+          </Button>
+        </Box>
+      </Fade>
+    </Paper>
   );
 } 

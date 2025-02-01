@@ -8,6 +8,7 @@ enum GameStatus {
 
 enum GameType {
   LETTER_RACE
+  PICTURE_GAME
   SPEED_WORDS
 }
 
@@ -27,6 +28,7 @@ type Game @model
   currentLetters: String       # For LETTER_PAIR
   timeRemaining: Int          # Common timer field
   roundStartTime: AWSDateTime # To track round timing
+  currentDrawing: AWSJSON
   questions: [Question] @hasMany
   createdAt: AWSDateTime!
   updatedAt: AWSDateTime!

@@ -42,6 +42,7 @@ import {
 } from '@mui/icons-material';
 import { GraphQLResult } from '@aws-amplify/api';
 import { playSound, Sounds } from '@/utils/soundEffects';
+import { usePlayerManagement } from '@/hooks/usePlayerManagement';
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -51,27 +52,14 @@ interface LetterGameProps {
 }
 
 export default function LetterGameComponent({ game, onGameUpdate }: LetterGameProps) {
-  const [player, setPlayer] = useState<Player | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
+  const { player, players, loading, error } = usePlayerManagement({ gameId: game.id });
+  const [timeLeft, setTimeLeft] = useState(game.timeRemaining || 60);
+  const [currentWord, setCurrentWord] = useState('');
   const [words, setWords] = useState<string[]>([]);
   const wordsRef = useRef<string[]>([]);
   const [word, setWord] = useState('');
   const [letters, setLetters] = useState(game.currentLetters || '');
-  const [timeLeft, setTimeLeft] = useState<number>(() => {
-    if (game.timeRemaining) return game.timeRemaining;
-    if (game.settings) {
-      try {
-        const parsedSettings = JSON.parse(game.settings);
-        return parsedSettings.timePerRound;
-      } catch (e) {
-        console.error('Error parsing settings for time:', e);
-        return letterRaceDefaults.timePerRound;
-      }
-    }
-    return letterRaceDefaults.timePerRound;
-  });
   const [isPlaying, setIsPlaying] = useState(game.status === 'PLAYING');
-  const [isHost, setIsHost] = useState(false);
   const [settings, setSettings] = useState<LetterRaceSettings>(() => {
     if (game.settings) {
       try {
@@ -84,9 +72,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     return letterRaceDefaults;
   });
   const [playerName, setPlayerName] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [gameEngine, setGameEngine] = useState<LetterGame | null>(null);
-  const playerCreationAttempted = useRef(false);
 
   // Update ref whenever words state changes
   useEffect(() => {
@@ -130,7 +116,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     if (game.status === GameStatus.ROUND_END) {
       setIsPlaying(false);
       setTimeLeft(0);
-      fetchPlayers();
+  
     } else if (game.status === GameStatus.PLAYING) {
       setIsPlaying(true);
       setTimeLeft(game.timeRemaining || settings.timePerRound);
@@ -165,118 +151,8 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     }
   }, [game.settings]);
 
-  useEffect(() => {
-    const playerManager = async () => {
-      if (!game?.id) return;
-      
-      try {
-        // 1. Get all current players
-        const existingPlayersResult = await client.graphql({
-          query: playersByGameId,
-          variables: { gameId: game.id }
-        }) as GraphQLResult<{
-          playersByGameId: {
-            items: Player[];
-          };
-        }>;
-        
-        const existingPlayers = existingPlayersResult.data?.playersByGameId.items || [];
-        setPlayers(existingPlayers);
 
-        // 2. Check for stored player ID
-        const storedPlayerId = localStorage.getItem(`player_${game.id}`);
-        const existingPlayer = existingPlayers.find(p => p.id === storedPlayerId);
 
-        if (existingPlayer) {
-          setPlayer(existingPlayer);
-          setIsHost(existingPlayer.isHost);
-          return;
-        }
-
-        // 3. Only create new player if we haven't found an existing one
-        if (!existingPlayer && !playerCreationAttempted.current) {
-          playerCreationAttempted.current = true;
-          
-          const isHost = existingPlayers.length === 0;
-          const playerName = `Player ${Math.floor(Math.random() * 1000)}`;
-          
-          const newPlayer = await client.graphql({
-            query: createPlayer,
-            variables: {
-              input: {
-                gameId: game.id,
-                name: playerName,
-                score: 0,
-                isHost,
-                isConfirmed: false,
-                currentWords: [],
-                gamePlayersId: game.id
-              }
-            }
-          }) as GraphQLResult<{
-            createPlayer: Player;
-          }>;
-
-          if (newPlayer.data?.createPlayer) {
-            localStorage.setItem(`player_${game.id}`, newPlayer.data.createPlayer.id);
-            setPlayer(newPlayer.data.createPlayer);
-            setIsHost(isHost);
-          }
-        }
-      } catch (error) {
-        console.error('Error in player management:', error);
-      }
-    };
-
-    playerManager();
-
-    // Cleanup
-    return () => {
-      playerCreationAttempted.current = false;
-    };
-  }, [game?.id]);
-
-  const fetchPlayers = async () => {
-    try {
-      const result = await client.graphql({
-        query: playersByGameId,
-        variables: { gameId: game.id }
-      }) as GraphQLResult<{
-        playersByGameId: {
-          items: Player[];
-        };
-      }>;
-      
-      if (result.data?.playersByGameId.items) {
-        setPlayers(result.data.playersByGameId.items);
-      }
-    } catch (error) {
-      console.error('Error fetching players:', error);
-    }
-  };
-
-  const handleUpdateName = async () => {
-    if (!player || !playerName.trim()) return;
-    
-    try {
-      const result = await client.graphql({
-        query: updatePlayer,
-        variables: {
-          input: {
-            id: player.id,
-            name: playerName.trim(),
-            isConfirmed: true
-          }
-        }
-      }) as GraphQLResult<{
-        updatePlayer: Player;
-      }>;
-
-      setPlayer(result.data?.updatePlayer);
-    } catch (error) {
-      console.error('Error updating player name:', error);
-    }
-  };
 
   const startRound = async () => {
     try {

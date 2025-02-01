@@ -18,6 +18,7 @@ export const getGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -47,6 +48,7 @@ export const listGames = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -82,6 +84,7 @@ export const getPlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -141,6 +144,7 @@ export const getQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -266,6 +270,7 @@ export const gameByCode = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings

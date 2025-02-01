@@ -1,13 +1,13 @@
 import { Box, Typography, TextField, Grid } from '@mui/material';
 import { GameType } from '@/types/game';
-import { LetterRaceSettings } from '@/types/settings';
-import { getDefaultSettings, letterRaceDefaults } from '@/constants/gameSettings';
+import { GameSettings, LetterRaceSettings, PictureGameSettings } from '@/types/settings';
+import { getDefaultSettings } from '@/constants/gameSettings';
 import { paperStyles, textGradientStyles } from '@/constants/styles';
 
 interface GameSettingsProps {
   gameType: GameType;
-  settings: LetterRaceSettings;
-  onUpdateSettings: (settings: LetterRaceSettings) => void;
+  settings: GameSettings;
+  onUpdateSettings: (settings: GameSettings) => void;
   isHost: boolean;
   showTitle?: boolean;
 }
@@ -21,7 +21,7 @@ export default function GameSettings({
 }: GameSettingsProps) {  
   if (!isHost || !settings) return null;
 
-  const handleSettingChange = (key: keyof LetterRaceSettings, value: number) => {
+  const handleSettingChange = (key: string, value: any) => {
     const newSettings = { ...settings };
     newSettings[key] = value;
     onUpdateSettings(newSettings);
@@ -52,7 +52,7 @@ export default function GameSettings({
       )}
       
       <Grid container spacing={3}>
-        {/* Basic Game Settings */}
+        {/* Basic Game Settings - Same for both games */}
         <Grid item xs={12} md={6}>
           <Box sx={settingBox}>
             <Typography variant="subtitle1" sx={{ 
@@ -84,8 +84,8 @@ export default function GameSettings({
                   type="number"
                   value={settings.timePerRound}
                   onChange={(e) => handleSettingChange('timePerRound', parseInt(e.target.value))}
-                  inputProps={{ min: 10, max: 300 }}
-                  helperText="Time in seconds (10-300)"
+                  inputProps={{ min: 30, max: 300 }}
+                  helperText="Time in seconds (30-300)"
                   size="small"
                 />
               </Grid>
@@ -93,7 +93,7 @@ export default function GameSettings({
           </Box>
         </Grid>
 
-        {/* Player Settings */}
+        {/* Player Settings - Same for both games */}
         <Grid item xs={12} md={6}>
           <Box sx={settingBox}>
             <Typography variant="subtitle1" sx={{ 
@@ -151,7 +151,7 @@ export default function GameSettings({
                     fullWidth
                     label="Minimum Word Length"
                     type="number"
-                    value={settings.minWordLength}
+                    value={(settings as LetterRaceSettings).minWordLength}
                     onChange={(e) => handleSettingChange('minWordLength', parseInt(e.target.value))}
                     inputProps={{ min: 3, max: 8 }}
                     helperText="Words must be 3-8 letters long"
@@ -164,10 +164,39 @@ export default function GameSettings({
                     fullWidth
                     label="Letters per Round"
                     type="number"
-                    value={settings.lettersPerRound}
+                    value={(settings as LetterRaceSettings).lettersPerRound}
                     onChange={(e) => handleSettingChange('lettersPerRound', parseInt(e.target.value))}
                     inputProps={{ min: 2, max: 3 }}
                     helperText="Number of letters provided (2-3)"
+                    size="small"
+                  />
+                </Grid>
+              </Grid>
+            </Box>
+          </Grid>
+        )}
+
+        {gameType === GameType.PICTURE_GAME && (
+          <Grid item xs={12} md={6}>
+            <Box sx={settingBox}>
+              <Typography variant="subtitle1" sx={{ 
+                mb: 2, 
+                fontWeight: 'bold',
+                color: 'primary.main'
+              }}>
+                Picture Game Settings
+              </Typography>
+              
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Drawing Time"
+                    type="number"
+                    value={(settings as PictureGameSettings).timePerRound}
+                    onChange={(e) => handleSettingChange('timePerRound', parseInt(e.target.value))}
+                    inputProps={{ min: 30, max: 120 }}
+                    helperText="Time to draw (30-120 seconds)"
                     size="small"
                   />
                 </Grid>

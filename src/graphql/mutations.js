@@ -21,6 +21,7 @@ export const createGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -52,6 +53,7 @@ export const updateGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -83,6 +85,7 @@ export const deleteGame = /* GraphQL */ `
       currentLetters
       timeRemaining
       roundStartTime
+      currentDrawing
       questions {
         nextToken
         __typename
@@ -122,6 +125,7 @@ export const createPlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -162,6 +166,7 @@ export const updatePlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -202,6 +207,7 @@ export const deletePlayer = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -239,6 +245,7 @@ export const createQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -276,6 +283,7 @@ export const updateQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
@@ -313,6 +321,7 @@ export const deleteQuestion = /* GraphQL */ `
         currentLetters
         timeRemaining
         roundStartTime
+        currentDrawing
         createdAt
         updatedAt
         settings
