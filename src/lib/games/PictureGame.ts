@@ -13,6 +13,11 @@ export interface PictureGameSettings extends GameSettings {
   maxRounds: number;
   maxPlayers: number;
   wordList: string[];  // List of words to draw
+  drawingColors: string[];
+  brushSizes: number[];
+  drawTime: number;
+  guessTime: number;
+  useCustomPrompts: boolean;
 }
 
 export interface DrawingData {
@@ -23,24 +28,33 @@ export interface DrawingData {
   }>;
 }
 
+export interface PlayerDrawing {
+  playerId: string;
+  drawing: DrawingData | null;
+  prompt: string;
+  guesses: Array<{
+    playerId: string;
+    guess: string;
+  }>;
+}
+
+export interface GuessScore {
+  playerId: string;
+  points: number;
+  reason: string;
+}
+
 export class PictureGame extends BaseGame {
-  private currentWord: string = '';
-  private currentDrawing: DrawingData | null = null;
-  private currentDrawer: string | null = null;
+  private drawings: Map<string, PlayerDrawing> = new Map();
   private settings: PictureGameSettings;
+  private phase: 'PROMPT' | 'DRAW' | 'GUESS' | 'REVEAL' = 'DRAW';
+  private currentDrawingIndex: number = 0;
 
   constructor(initialState: GameState) {
     super(initialState);
     this.settings = initialState.settings ? 
       JSON.parse(initialState.settings) : 
       pictureGameDefaults;
-    
-    // Initialize current word and drawer from settings
-    if (initialState.settings) {
-      const parsedSettings = JSON.parse(initialState.settings);
-      this.currentWord = parsedSettings.currentWord || '';
-      this.currentDrawer = parsedSettings.currentDrawer || null;
-    }
   }
 
   validateMove(move: GameMove): boolean {
@@ -65,72 +79,108 @@ export class PictureGame extends BaseGame {
     return score;
   }
 
-  async startNewRound(): Promise<void> {
-    // Ensure we have a word list
-    const wordList = this.settings.wordList || pictureGameDefaults.wordList;
-    const randomWord = wordList[Math.floor(Math.random() * wordList.length)];
-    
-    try {
-      // Get latest players from the game
-      const playersResult = await client.graphql({
-        query: playersByGameId,
-        variables: { gameId: this.state.id }
-      });
-      
-      const players = playersResult.data.playersByGameId.items || [];
-      
-      // Select next drawer
-      let nextDrawer;
-      if (!this.currentDrawer) {
-        // If no current drawer, pick the first player
-        nextDrawer = players[0]?.id;
-      } else {
-        // Find current drawer's index and rotate to next
-        const currentIndex = players.findIndex(p => p.id === this.currentDrawer);
-        const nextIndex = (currentIndex + 1) % players.length;
-        nextDrawer = players[nextIndex]?.id;
-      }
-
-      this.currentWord = randomWord;
-      this.currentDrawer = nextDrawer;
-      this.currentDrawing = null;
-
-      // Store game-specific data in settings JSON
-      const updatedSettings = {
-        ...this.settings,
-        currentWord: randomWord,
-        currentDrawer: nextDrawer
-      };
-
-      // Update game state with mutation using only schema-defined fields
-      const updateResult = await client.graphql({
-        query: updateGame,
-        variables: {
-          input: {
-            id: this.state.id,
-            status: GameStatus.PLAYING,
-            timeRemaining: this.settings.timePerRound,
-            currentRound: this.state.currentRound,
-            settings: JSON.stringify(updatedSettings)
-          }
-        }
-      });
-
-      if (!updateResult.data?.updateGame) {
-        throw new Error('Failed to update game state');
-      }
-
-      // Update local state
-      this.state = {
-        ...this.state,
-        ...updateResult.data.updateGame
-      };
-
-      return;
-    } catch (error) {
-      console.error('Error starting new round:', error);
-      throw error;
+  getRandomPrompt(): string {
+    if (!this.settings.wordList || this.settings.wordList.length === 0) {
+      return "House"; // Default fallback
     }
+    return this.settings.wordList[Math.floor(Math.random() * this.settings.wordList.length)];
+  }
+
+  async startNewRound(): Promise<void> {
+    const playersResult = await client.graphql({
+      query: playersByGameId,
+      variables: { gameId: this.state.id }
+    });
+    
+    const players = playersResult.data.playersByGameId.items;
+    
+    // Initialize settings with defaults if needed
+    this.settings = {
+      ...pictureGameDefaults,
+      ...this.settings
+    };
+
+    // If using custom prompts, initialize empty prompts
+    if (this.settings.useCustomPrompts) {
+      this.phase = 'PROMPT';
+    } else {
+      this.phase = 'DRAW';
+    }
+
+    // Reset drawings map
+    this.drawings = new Map();
+
+    // Initialize drawings for each player
+    players.forEach(player => {
+      const word = this.settings.useCustomPrompts ? '' : 
+        this.settings.wordList[Math.floor(Math.random() * this.settings.wordList.length)];
+      
+      this.drawings.set(player.id, {
+        playerId: player.id,
+        drawing: null,
+        prompt: word,
+        guesses: []
+      });
+    });
+
+    // Update game state with proper time based on phase
+    const timeRemaining = this.phase === 'PROMPT' ? 30 : this.settings.drawTime;
+    const nextRound = this.state.status === GameStatus.LOBBY ? 1 : this.state.currentRound + 1;
+
+    await this.updateGameState({
+      status: GameStatus.PLAYING,
+      currentRound: nextRound,
+      timeRemaining,
+      settings: JSON.stringify({
+        ...this.settings,
+        phase: this.phase,
+        drawings: Array.from(this.drawings.values())
+      })
+    });
+  }
+
+  async submitPrompt(playerId: string, prompt: string): Promise<void> {
+    if (this.phase !== 'PROMPT') return;
+    
+    const drawing = this.drawings.get(playerId);
+    if (drawing) {
+      drawing.prompt = prompt;
+    }
+
+    // Check if all prompts are submitted
+    const allPromptsSubmitted = Array.from(this.drawings.values())
+      .every(d => d.prompt);
+
+    if (allPromptsSubmitted) {
+      // Randomly assign prompts to different players
+      const prompts = Array.from(this.drawings.values())
+        .map(d => d.prompt);
+      const shuffledPrompts = this.shuffleArray(prompts);
+      
+      let i = 0;
+      this.drawings.forEach(drawing => {
+        drawing.prompt = shuffledPrompts[i++];
+      });
+
+      this.phase = 'DRAW';
+      await this.updateGameState({
+        timeRemaining: this.settings.drawTime,
+        settings: JSON.stringify({
+          ...this.settings,
+          phase: this.phase,
+          drawings: Array.from(this.drawings.values())
+        })
+      });
+    }
+  }
+
+  private shuffleArray<T>(array: T[]): T[] {
+    const newArray = [...array];
+    for (let i = newArray.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+    }
+    return newArray;
   }
 
   async updateDrawing(drawingData: DrawingData, playerId: string): Promise<boolean> {
@@ -190,4 +240,52 @@ export class PictureGame extends BaseGame {
       throw error;
     }
   }
-} 
+
+  calculateScores(): Map<string, GuessScore[]> {
+    const scores = new Map<string, GuessScore[]>();
+    
+    // Initialize scores for all players
+    this.drawings.forEach(drawing => {
+      scores.set(drawing.playerId, []);
+    });
+
+    // Calculate scores for each drawing
+    this.drawings.forEach(drawing => {
+      // Points for the artist based on correct guesses
+      const correctGuesses = drawing.guesses.filter(g => 
+        g.guess.toLowerCase().trim() === drawing.prompt.toLowerCase().trim()
+      );
+      
+      const artistScore = {
+        playerId: drawing.playerId,
+        points: correctGuesses.length * 2, // 2 points per correct guess
+        reason: `${correctGuesses.length} players guessed correctly`
+      };
+      
+      scores.get(drawing.playerId)?.push(artistScore);
+
+      // Points for guessers
+      drawing.guesses.forEach(guess => {
+        if (guess.playerId === drawing.playerId) return; // Skip artist's own guess
+        
+        const isCorrect = guess.guess.toLowerCase().trim() === drawing.prompt.toLowerCase().trim();
+        const guesserScore = {
+          playerId: guess.playerId,
+          points: isCorrect ? 3 : 0, // 3 points for correct guess
+          reason: isCorrect ? `Correctly guessed "${drawing.prompt}"` : `Incorrect guess for "${drawing.prompt}"`
+        };
+        
+        scores.get(guess.playerId)?.push(guesserScore);
+      });
+    });
+
+    return scores;
+  }
+
+  async updateSettings(newSettings: PictureGameSettings): Promise<void> {
+    this.settings = newSettings;
+    await this.updateGameState({
+      settings: JSON.stringify(newSettings)
+    });
+  }
+}

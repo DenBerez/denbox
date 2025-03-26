@@ -19,15 +19,17 @@ import {
   Tooltip 
 } from '@mui/material';
 import { Edit as EditIcon } from '@mui/icons-material';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { amplifyClient as client } from '@/utils/amplifyClient';
 import { playersByGameId } from '@/graphql/queries';
 import { updatePlayer } from '@/graphql/mutations';
-import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
 import { Player } from '@/types/game';
 import { paperStyles, scrollbarStyles, textGradientStyles, buttonStyles } from '@/constants/styles';
 import { graphqlWithRetry } from '@/utils/apiClient';
-
+import { WebSocketService } from '@/services/WebSocketService';
+import { getCurrentUser } from 'aws-amplify/auth';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { useGameState } from '@/providers/GameStateProvider';
 // Add colorful avatar backgrounds
 const avatarColors = [
   '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD',
@@ -115,79 +117,32 @@ function EditNameDialog({ open, onClose, player, onSave }: EditDialogProps) {
 }
 
 const PlayerList = ({ gameId, currentPlayer, onPlayersUpdate }: PlayerListProps) => {
-  const [players, setPlayers] = useState<Player[]>([]);
+  const { players, isConnected, sendMessage } = useGameState();
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Add effect to propagate player updates to parent
+  useEffect(() => {
+    console.log('PlayerList received players update:', players);
+    if (players.length > 0) {
+      onPlayersUpdate?.(players);
+    }
+  }, [players, onPlayersUpdate]);
 
   useEffect(() => {
-    let isMounted = true;
-    
-    const fetchAndSetPlayers = async () => {
-      try {
-        const result = await graphqlWithRetry(playersByGameId, { gameId });
-        
-        if (!isMounted) return;
-        
-        if (result.data.playersByGameId.items) {
-          const sortedPlayers = result.data.playersByGameId.items
-            .sort((a: Player, b: Player) => {
-              return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-            });
-    
-          const processedPlayers = sortedPlayers.map((player: Player, index: number) => ({
-            ...player,
-            isHost: index === 0
-          }));
-    
-          setPlayers(processedPlayers);
-          onPlayersUpdate?.(processedPlayers);
-    
-          // Update host status in database if needed
-          const currentPlayerInList = processedPlayers.find(p => p.id === currentPlayer?.id);
-          if (currentPlayerInList && currentPlayerInList.isHost !== currentPlayer.isHost) {
-            await graphqlWithRetry(updatePlayer, {
-              input: {
-                id: currentPlayer.id,
-                isHost: currentPlayerInList.isHost
-              }
-            });
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching players:', error);
-      }
-    };
-
-    fetchAndSetPlayers();
-    
-    // Set up subscriptions
-    const createSub = client.graphql({
-      query: onCreatePlayerByGameId,
-      variables: { gameId }
-    }).subscribe({
-      next: fetchAndSetPlayers,
-      error: (error) => console.error('Subscription error:', error),
+    console.log('PlayerList state:', {
+      currentPlayer: currentPlayer?.id,
+      playersCount: players.length,
+      players: players.map(p => ({ id: p.id, name: p.name }))
     });
-
-    const updateSub = client.graphql({
-      query: onUpdatePlayerByGameId,
-      variables: { gameId }
-    }).subscribe({
-      next: fetchAndSetPlayers,
-      error: (error) => console.error('Subscription error:', error),
-    });
-
-    return () => {
-      isMounted = false;
-      createSub.unsubscribe();
-      updateSub.unsubscribe();
-    };
-  }, [gameId, currentPlayer?.id, onPlayersUpdate]);
+  }, [currentPlayer, players]);
 
   const handleUpdateName = async (newName: string) => {
-    if (!editingPlayer) return;
+    if (!editingPlayer || !isConnected) return;
 
     try {
-      await client.graphql({
+      // First update in database
+      const result = await client.graphql({
         query: updatePlayer,
         variables: {
           input: {
@@ -197,8 +152,16 @@ const PlayerList = ({ gameId, currentPlayer, onPlayersUpdate }: PlayerListProps)
           }
         }
       });
+
+      // Then broadcast via WebSocket
+      await sendMessage({
+        type: 'PLAYER_UPDATE',
+        gameId,
+        data: result.data.updatePlayer
+      });
     } catch (error) {
       console.error('Error updating player name:', error);
+      setError('Failed to update name');
     }
   };
 
@@ -220,11 +183,19 @@ const PlayerList = ({ gameId, currentPlayer, onPlayersUpdate }: PlayerListProps)
   };
 
   const processPayers = (players: Player[]) => {
+    const sortedPlayers = players
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    
+    // Ensure first player is host
+    const processedPlayers = sortedPlayers.map((player, index) => ({
+      ...player,
+      isHost: index === 0 || player.isHost
+    }));
+
+    // Remove duplicates while preserving host status
     return Array.from(
       new Map(
-        players
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-          .map(player => [player.id, { ...player, isHost: false }])
+        processedPlayers.map(player => [player.id, player])
       ).values()
     );
   };

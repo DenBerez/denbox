@@ -21,6 +21,8 @@ import GameSettingsDialog from './GameSettingsDialog';
 import SettingsIcon from '@mui/icons-material/Settings';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
+import { useGameState } from '@/providers/GameStateProvider';
+import { GameStatus } from '@/types/game';
 
 interface LobbyProps {
   game: Game;
@@ -31,6 +33,7 @@ interface LobbyProps {
 }
 
 export default function Lobby({ game, player, players, onStartGame, settings }: LobbyProps) {
+  const { isConnected, sendMessage } = useGameState();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [localSettings, setLocalSettings] = useState(() => {
@@ -80,6 +83,11 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
   };
 
   const handleStartGame = async (players: Player[]) => {
+    if (!player?.id) {
+      setError('Player information is missing. Please refresh the page.');
+      return;
+    }
+    
     if (!localSettings) {
       setError('Game settings not found');
       return;
@@ -95,6 +103,17 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
         setLoading(false);
         return;
       }
+
+      // Broadcast game start via WebSocket
+      await sendMessage({
+        type: 'GAME_UPDATE',
+        gameId: game.id,
+        data: {
+          status: GameStatus.PLAYING,
+          timeRemaining: localSettings.timePerRound,
+          currentRound: 1
+        }
+      });
 
       onStartGame();
     } catch (error) {

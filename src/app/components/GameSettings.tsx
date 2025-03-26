@@ -1,4 +1,4 @@
-import { Box, Typography, TextField, Grid } from '@mui/material';
+import { Box, Typography, TextField, Grid, FormControlLabel, Switch } from '@mui/material';
 import { GameType } from '@/types/game';
 import { GameSettings, LetterRaceSettings, PictureGameSettings } from '@/types/settings';
 import { getDefaultSettings } from '@/constants/gameSettings';
@@ -193,11 +193,37 @@ export default function GameSettings({
                     fullWidth
                     label="Drawing Time"
                     type="number"
-                    value={(settings as PictureGameSettings).timePerRound}
-                    onChange={(e) => handleSettingChange('timePerRound', parseInt(e.target.value))}
-                    inputProps={{ min: 30, max: 120 }}
-                    helperText="Time to draw (30-120 seconds)"
+                    value={(settings as PictureGameSettings).drawTime || 60}
+                    onChange={(e) => handleSettingChange('drawTime', parseInt(e.target.value))}
+                    inputProps={{ min: 30, max: 180 }}
+                    helperText="Time to draw (30-180 seconds)"
                     size="small"
+                  />
+                </Grid>
+                
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
+                    label="Guess Time"
+                    type="number"
+                    value={(settings as PictureGameSettings).guessTime || 30}
+                    onChange={(e) => handleSettingChange('guessTime', parseInt(e.target.value))}
+                    inputProps={{ min: 15, max: 60 }}
+                    helperText="Time to guess each drawing (15-60 seconds)"
+                    size="small"
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={(settings as PictureGameSettings).useCustomPrompts || false}
+                        onChange={(e) => handleSettingChange('useCustomPrompts', e.target.checked)}
+                        disabled={!isHost}
+                      />
+                    }
+                    label="Allow players to create prompts"
                   />
                 </Grid>
               </Grid>

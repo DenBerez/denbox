@@ -144,7 +144,7 @@ export default function GameTypeSelector({ onSelectGameType }: GameTypeSelectorP
               borderRadius: 2,
             }}
           >
-            Start Game
+            Open Lobby
           </Button>
         </Box>
       </Fade>

@@ -46,4 +46,29 @@ export interface GameTypeConfig {
   tutorial: string;
   icon: any;
   defaultSettings: GameSettings;
+}
+
+export type WebSocketMessageType = 
+  | 'GAME_UPDATE'
+  | 'PLAYER_UPDATE' 
+  | 'PLAYER_JOIN'
+  | 'PLAYER_LEAVE'
+  | 'ROUND_START'
+  | 'ROUND_END';
+
+export interface WebSocketMessage {
+  type: WebSocketMessageType;
+  gameId: string;
+  data: any;
+}
+
+interface GameStateContextType {
+  game: Game | null;
+  players: Player[];
+  isConnected: boolean;
+  isLoading: boolean;
+  error: string | null;
+  sendMessage: (message: any) => Promise<void>;
+  updateGame: (updates: Partial<Game>) => Promise<void>;
+  serverTimeOffset: number;
 } 

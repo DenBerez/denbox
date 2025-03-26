@@ -8,6 +8,8 @@ import { getGame } from '@/graphql/queries';
 import LetterGameComponent from '@/app/components/LetterGame';
 import PictureGameComponent from '@/app/components/PictureGame';
 import { useRouter } from 'next/navigation';
+import { WebSocketErrorBoundary } from '@/components/WebSocketErrorBoundary';
+import { GameStateProvider } from '@/providers/GameStateProvider';
 
 interface GamePageProps {
   params: Promise<{
@@ -33,6 +35,7 @@ export default function GamePage({ params }: GamePageProps) {
           query: getGame,
           variables: { id: resolvedParams?.id }
         });
+        console.log('Fetched game:', result.data.getGame); // Add logging
         setGame(result.data.getGame);
       } catch (error) {
         console.error('Error fetching game:', error);
@@ -46,24 +49,29 @@ export default function GamePage({ params }: GamePageProps) {
 
   if (loading) return <div>Loading...</div>;
   if (!game) return <div>Game not found</div>;
-  if (!game.gameType) {
-    router.push('/');
-    return null;
-  }
+  
+  console.log('Rendering game with status:', game.status); // Add logging
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      {game.gameType === GameType.LETTER_RACE ? (
-        <LetterGameComponent 
-          game={game} 
-          onGameUpdate={(updatedGame) => setGame(updatedGame)} 
-        />
-      ) : (
-        <PictureGameComponent 
-          game={game} 
-          onGameUpdate={(updatedGame) => setGame(updatedGame)} 
-        />
-      )}
+      <GameStateProvider initialGame={game}>
+        <WebSocketErrorBoundary 
+          gameId={game.id}
+          onError={(error) => console.error('Game connection error:', error)}
+        >
+          {game.gameType === GameType.LETTER_RACE ? (
+            <LetterGameComponent 
+              game={game} 
+              onGameUpdate={(updatedGame) => setGame(updatedGame)} 
+            />
+          ) : (
+            <PictureGameComponent 
+              game={game} 
+              onGameUpdate={(updatedGame) => setGame(updatedGame)} 
+            />
+          )}
+        </WebSocketErrorBoundary>
+      </GameStateProvider>
     </Container>
   );
 }

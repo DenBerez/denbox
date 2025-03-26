@@ -2,6 +2,7 @@ import { GameSettings, GameType, GameStatus } from '@/types/game';
 import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updateGame, updatePlayer } from '@/graphql/mutations';
 import { letterRaceDefaults } from '@/constants/gameSettings';
+import { ConnectionStateManager } from '@/utils/connectionStateManager';
 
 /**
  * BaseGame provides core game functionality and structure for word-based games:
@@ -40,9 +41,11 @@ export interface Player {
 export abstract class BaseGame {
   protected state: GameState;
   protected settings: GameSettings;
+  private wsManager: ConnectionStateManager;
 
   constructor(initialState: GameState) {
     this.state = initialState;
+    this.wsManager = ConnectionStateManager.getInstance();
     try {
       const parsedSettings = JSON.parse(initialState.settings);
       this.settings = {
@@ -108,19 +111,43 @@ export abstract class BaseGame {
     }
   }
 
+  protected async broadcastGameUpdate(data: any) {
+    try {
+      const connection = await this.wsManager.getOrCreateConnection(this.state.id);
+      await connection.send({
+        type: 'GAME_UPDATE',
+        gameId: this.state.id,
+        data
+      });
+    } catch (error) {
+      console.error('Failed to broadcast game update:', error);
+      throw error;
+    }
+  }
+
   protected async updateGameState(updates: Partial<GameState>): Promise<void> {
     try {
-      await client.graphql({
+      // Add timestamp for synchronization
+      const updatedState = {
+        ...updates,
+        roundStartTime: updates.status === GameStatus.PLAYING ? 
+          new Date().toISOString() : undefined
+      };
+
+      const result = await client.graphql({
         query: updateGame,
         variables: {
           input: {
             id: this.state.id,
-            ...updates,
-            currentRound: (updates.status === GameStatus.PLAYING) ? 
-              this.state.currentRound + 1 : 
-              this.state.currentRound
+            ...updatedState
           }
         }
+      });
+
+      // Broadcast update via WebSocket
+      await this.broadcastGameUpdate({
+        ...result.data.updateGame,
+        timestamp: Date.now()
       });
     } catch (error) {
       console.error('Error updating game state:', error);

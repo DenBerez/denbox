@@ -25,18 +25,12 @@ export const pictureGameDefaults: PictureGameSettings = {
   timePerRound: 60,
   minPlayers: 2,
   maxPlayers: 8,
+  drawTime: 60,
+  guessTime: 30,
+  useCustomPrompts: false,
   wordList: [
-    'HOUSE',
-    'CAT',
-    'DOG',
-    'TREE',
-    'SUN',
-    'FLOWER',
-    'CAR',
-    'BOAT',
-    'BIRD',
-    'FISH',
-    // Add more simple words as needed
+    'HOUSE', 'CAT', 'DOG', 'TREE', 'SUN', 'FLOWER',
+    'CAR', 'BOAT', 'BIRD', 'FISH'
   ],
   drawingColors: ['#000000', '#FF0000', '#00FF00', '#0000FF'],
   brushSizes: [2, 4, 6, 8, 10]

@@ -20,9 +20,10 @@ import {
 import { amplifyClient as client } from '@/utils/amplifyClient';
 import { playersByGameId } from '@/graphql/queries';
 import { updatePlayer } from '@/graphql/mutations';
-import { Game, Player } from '@/types/game';
+import { Game, GameType, Player } from '@/types/game';
 import { paperStyles, textGradientStyles, buttonStyles, gradients } from '@/constants/styles';
 import { LetterGame } from '@/lib/games/LetterGame';
+import { GuessScore } from '@/lib/games/PictureGame';
 
 interface PostRoundScreenProps {
   game: Game;
@@ -48,6 +49,7 @@ export default function PostRoundScreen({
   const [players, setPlayers] = useState<ValidatedPlayerData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [gameEngine, setGameEngine] = useState<LetterGame | null>(null);
 
   const fetchAndValidateWords = async () => {
     try {
@@ -88,8 +90,8 @@ export default function PostRoundScreen({
           timestamp: Date.now()
         }));
 
-        const gameEngine = new LetterGame(game);
-        const calculatedScore = gameEngine.calculateScore(moves);
+        // Use the component-level gameEngine
+        const calculatedScore = gameEngine ? gameEngine.calculateScore(moves) : 0;
 
         // Update player's score in database
         client.graphql({
@@ -121,6 +123,7 @@ export default function PostRoundScreen({
   };
 
   useEffect(() => {
+    setGameEngine(new LetterGame(game));
     fetchAndValidateWords();
   }, [game.id]);
 
@@ -195,6 +198,39 @@ export default function PostRoundScreen({
       )}
     </Box>
   );
+
+  const PictureGameScores = ({ scores, players }: { 
+    scores: Map<string, GuessScore[]>, 
+    players: Player[] 
+  }) => {
+    return (
+      <Box sx={{ mt: 3 }}>
+        {Array.from(scores.entries()).map(([playerId, scoreDetails]) => {
+          const player = players.find(p => p.id === playerId);
+          const totalPoints = scoreDetails.reduce((sum, score) => sum + score.points, 0);
+          
+          return (
+            <Paper key={playerId} sx={{ p: 2, mb: 2 }}>
+              <Typography variant="h6">
+                {player?.name} - Total Points: {totalPoints}
+              </Typography>
+              
+              <List dense>
+                {scoreDetails.map((score, index) => (
+                  <ListItem key={index}>
+                    <ListItemText
+                      primary={`+${score.points} points`}
+                      secondary={score.reason}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Paper>
+          );
+        })}
+      </Box>
+    );
+  };
 
   return (
     <Paper elevation={3} sx={{ ...paperStyles.gradient }}>
@@ -476,7 +512,15 @@ export default function PostRoundScreen({
             )}
           </>
         )}
+
+        {game.gameType === GameType.PICTURE_GAME && gameEngine && (
+          <PictureGameScores 
+            scores={gameEngine.calculateScores(game)} 
+            players={players} 
+          />
+        )}
       </Box>
     </Paper>
+    
   );
 } 

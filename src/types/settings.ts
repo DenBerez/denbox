@@ -18,6 +18,9 @@ export interface PictureGameSettings extends GameSettings {
   wordList: string[];
   drawingColors: string[];
   brushSizes: number[];
+  drawTime: number;
+  guessTime: number;
+  useCustomPrompts: boolean;
 }
 
 // Remove until implemented

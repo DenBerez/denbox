@@ -46,7 +46,7 @@ export default function GameHeader({ game, showRoundInfo = false }: GameHeaderPr
             <Link href="/" style={{ textDecoration: 'none' }}>
               <Box 
                 component="img"
-                src="/simpleBox.png"
+                src="/dbicon.png"
                 alt="Denbox Logo"
                 sx={{ 
                   width: { xs: 40, sm: 60 },

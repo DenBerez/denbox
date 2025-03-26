@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Amplify } from 'aws-amplify';
 import awsconfig from '../aws-exports';
 import {
@@ -24,24 +24,47 @@ import AddIcon from '@mui/icons-material/Add';
 import GameTypeSelector from './components/GameTypeSelector';
 import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
 import { amplifyClient as client } from '@/utils/amplifyClient';
-
-
+import config from '../aws-exports';
+import { JoinFull, Login } from '@mui/icons-material';
+import ReactConfetti from 'react-confetti';
 
 export default function Home() {
-  const [gameCode, setGameCode] = useState('');
+  const [gameCodeChars, setGameCodeChars] = useState(['', '', '', '']);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showGameTypeSelector, setShowGameTypeSelector] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [confetti, setConfetti] = useState(false);
+  const [logoScale, setLogoScale] = useState(1);
+  const [logoRotation, setLogoRotation] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  const handleLogoClick = useCallback(() => {
+    // Play a fun sound
+    // playSound('tada');
+    
+    // Show confetti
+    setConfetti(true);
+    
+    // Animate the logo
+    setLogoScale(1.3);
+    setLogoRotation(360);
+    
+    // Reset logo animation after a delay
+    setTimeout(() => {
+      setLogoScale(1);
+      setLogoRotation(0);
+    }, 1000);
+  }, []);
+
   const handleJoinGame = async () => {
-    if (!gameCode.trim()) {
-      setError('Please enter a game code');
+    const fullGameCode = gameCodeChars.join('');
+    if (!fullGameCode || fullGameCode.length !== 4) {
+      setError('Please enter a complete game code');
       return;
     }
 
@@ -51,7 +74,9 @@ export default function Home() {
     try {
       const result = await client.graphql({
         query: getGame,
-        variables: { id: gameCode.toUpperCase() }
+        authMode: 'apiKey',
+        apiKey: config.aws_appsync_apiKey,
+        variables: { id: fullGameCode }
       });
 
       const game = result.data.getGame;
@@ -65,7 +90,7 @@ export default function Home() {
         return;
       }
 
-      router.push(`/game/${gameCode.toUpperCase()}`);
+      router.push(`/game/${fullGameCode}`);
     } catch (error) {
       console.error('Error joining game:', error);
       setError('Failed to join game');
@@ -78,20 +103,78 @@ export default function Home() {
     setShowGameTypeSelector(true);
   };
 
+  const handleCodeChange = (index: number, value: string) => {
+    const newValue = value.toUpperCase();
+    if (newValue.length <= 1 && /^[A-Z0-9]*$/.test(newValue)) {
+      const newGameCodeChars = [...gameCodeChars];
+      newGameCodeChars[index] = newValue;
+      setGameCodeChars(newGameCodeChars);
+      setError(null);
+
+      // Auto-focus next input
+      if (newValue.length === 1 && index < 3) {
+        const nextInput = document.querySelector(`input[name="code-${index + 1}"]`) as HTMLInputElement;
+        if (nextInput) {
+          nextInput.focus();
+          // For mobile: ensure virtual keyboard stays open
+          nextInput.click();
+        }
+      }
+    }
+  };
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Handle backspace/delete
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault(); // Prevent default behavior
+      
+      // If current field has content, clear it
+      if (gameCodeChars[index]) {
+        const newGameCodeChars = [...gameCodeChars];
+        newGameCodeChars[index] = '';
+        setGameCodeChars(newGameCodeChars);
+      } 
+      // Otherwise focus previous input if it exists
+      else if (index > 0) {
+        const prevInput = document.querySelector(`input[name="code-${index - 1}"]`) as HTMLInputElement;
+        if (prevInput) {
+          prevInput.focus();
+          // For mobile: ensure virtual keyboard stays open
+          prevInput.click();
+        }
+      }
+    }
+    
+    // Handle arrow keys for navigation
+    if (e.key === 'ArrowLeft' && index > 0) {
+      const prevInput = document.querySelector(`input[name="code-${index - 1}"]`) as HTMLInputElement;
+      if (prevInput) {
+        prevInput.focus();
+        prevInput.click(); // For mobile
+      }
+    }
+    
+    if (e.key === 'ArrowRight' && index < 3) {
+      const nextInput = document.querySelector(`input[name="code-${index + 1}"]`) as HTMLInputElement;
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.click(); // For mobile
+      }
+    }
+  };
+
   const handleSelectGameType = async (gameType: GameTypeConfig) => {
     setLoading(true);
     setError(null);
 
     try {
-      // Generate a 4-character code using uppercase letters and numbers
       const gameCode = Array(4)
         .fill(0)
         .map(() => '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 36)])
         .join('');
         
       const defaultSettings = getDefaultSettings(gameType.id);
-      console.log('Default settings:', defaultSettings);
-
+      
       const input = {
         id: gameCode,
         code: gameCode,
@@ -102,15 +185,15 @@ export default function Home() {
         currentRound: 1,
         timeRemaining: defaultSettings.timePerRound,
         hostId: gameCode
-      }
+      };
 
-      console.log('Input:', input);
+      console.log('Creating game with input:', input);
 
       const result = await client.graphql({
         query: createGame,
-        variables: {
-          input: input
-        },
+        authMode: 'apiKey',
+        apiKey: config.aws_appsync_apiKey,
+        variables: { input }
       });
 
       if (result.data.createGame) {
@@ -121,6 +204,60 @@ export default function Home() {
     } catch (error) {
       console.error('Error creating game:', error);
       setError('Failed to create game');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      // Only trigger join if all code fields are filled
+      if (!gameCodeChars.some(char => !char)) {
+        handleJoinGame();
+      }
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>, index: number) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    
+    if (pastedData) {
+      // If we have exactly 4 characters, fill all fields
+      if (pastedData.length === 4) {
+        const newChars = pastedData.split('');
+        setGameCodeChars(newChars);
+        
+        // Focus the last input
+        setTimeout(() => {
+          const lastInput = document.querySelector(`input[name="code-3"]`) as HTMLInputElement;
+          if (lastInput) {
+            lastInput.focus();
+          }
+        }, 0);
+      } 
+      // Otherwise just paste at current position and advance
+      else {
+        const newGameCodeChars = [...gameCodeChars];
+        
+        // Fill as many characters as we can from the current position
+        for (let i = 0; i < pastedData.length && index + i < 4; i++) {
+          newGameCodeChars[index + i] = pastedData[i];
+        }
+        
+        setGameCodeChars(newGameCodeChars);
+        
+        // Focus the next empty input or the last one
+        const nextEmptyIndex = newGameCodeChars.findIndex(char => !char);
+        const focusIndex = nextEmptyIndex !== -1 ? nextEmptyIndex : 3;
+        
+        setTimeout(() => {
+          const nextInput = document.querySelector(`input[name="code-${focusIndex}"]`) as HTMLInputElement;
+          if (nextInput) {
+            nextInput.focus();
+          }
+        }, 0);
+      }
     }
   };
 
@@ -128,6 +265,21 @@ export default function Home() {
 
   return (
     <Container maxWidth="sm" sx={{ minHeight: '100vh', py: 4 }}>
+      {confetti && (
+        <ReactConfetti
+          width={typeof window !== 'undefined' ? window.innerWidth : 300}
+          height={typeof window !== 'undefined' ? window.innerHeight : 200}
+          recycle={false}
+          numberOfPieces={100}
+          gravity={0.2}
+          colors={['#00e5ff', '#ff00e5', '#e5ff00', '#00ff00', '#ff0000', '#0000ff']}
+          onConfettiComplete={(confetti) => {
+            setConfetti(false);
+            confetti?.reset();
+          }}
+        />
+      )}
+      
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <Box sx={{ 
           display: 'flex', 
@@ -136,13 +288,21 @@ export default function Home() {
           alignItems: 'center', 
           flexDirection: 'column'
         }}>
-          <img
-            src="/simpleBox.png"
+          <Box 
+            component="img"
+            src="/dbicon.png"
             alt="Denbox Logo"
-            style={{
-              width: '120px',
+            onClick={handleLogoClick}
+            sx={{
+              width: '20%',
               height: 'auto',
-              marginBottom: '1rem'
+              cursor: 'pointer',
+              transition: 'transform 0.5s ease, filter 0.3s ease',
+              transform: `scale(${logoScale}) rotate(${logoRotation}deg)`,
+              '&:hover': {
+                transform: 'scale(1.1)',
+                filter: 'drop-shadow(0 0 8px #00e5ff)'
+              }
             }}
           />
           <Typography 
@@ -152,7 +312,7 @@ export default function Home() {
               ...textGradientStyles,
               fontSize: { xs: '2.5rem', sm: '3.5rem' },
               fontWeight: 700,
-              mb: 2
+              my: 2
             }}
           >
             Denbox
@@ -178,58 +338,16 @@ export default function Home() {
           />
         ) : (
           <>
-            <Paper sx={{ ...paperStyles.gradient }}>
-              <Box sx={{ p: 3 }}>
-                <Typography 
-                  variant="h6" 
-                  gutterBottom
-                  sx={{ 
-                    ...textGradientStyles,
-                    mb: 3,
-                    fontWeight: 600
-                  }}
-                >
-                  Join Existing Game
-                </Typography>
-                <Box sx={{ 
-                  display: 'flex', 
-                  gap: 2,
-                  alignItems: 'flex-start'
-                }}>
-                  <TextField
-                    fullWidth
-                    label="Game Code"
-                    value={gameCode}
-                    onChange={(e) => {
-                      setGameCode(e.target.value.toUpperCase());
-                      setError(null);
-                    }}
-                    disabled={loading}
-                    error={!!error}
-                    helperText={error}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        '&:hover fieldset': {
-                          borderColor: 'primary.main',
-                        },
-                      },
-                    }}
-                  />
-                  <Button
-                    variant="contained"
-                    onClick={handleJoinGame}
-                    disabled={loading || !gameCode.trim()}
-                    sx={{
-                      ...buttonStyles.primary,
-                      height: 56, // Match TextField height
-                      minWidth: 120
-                    }}
-                  >
-                    {loading ? <CircularProgress size={24} /> : 'Join'}
-                  </Button>
-                </Box>
-              </Box>
-            </Paper>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={handleCreateGame}
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={20} /> : <AddIcon />}
+              sx={buttonStyles.primary}
+            >
+              New Game
+            </Button>
 
             <Divider sx={{ 
               my: 2,
@@ -245,16 +363,94 @@ export default function Home() {
               </Typography>
             </Divider>
 
-            <Button
-              variant="contained"
-              size="large"
-              onClick={handleCreateGame}
-              disabled={loading}
-              startIcon={loading ? <CircularProgress size={20} /> : <AddIcon />}
-              sx={buttonStyles.primary}
+            <Box 
+              component="form" 
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!gameCodeChars.some(char => !char)) {
+                  handleJoinGame();
+                }
+              }}
+              sx={{ 
+                display: 'flex', 
+                gap: 2,
+                flexDirection: { xs: 'column', sm: 'row' },
+                justifyContent: 'center',
+                alignItems: 'center',
+                mb: 2
+              }}
             >
-              Create New Game
-            </Button>
+              <Box sx={{ 
+                display: 'flex', 
+                gap: 1,
+              }}>
+                {gameCodeChars.map((char, index) => (
+                  <TextField
+                    key={index}
+                    name={`code-${index}`}
+                    value={char}
+                    onChange={(e) => handleCodeChange(index, e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(index, e)}
+                    onPaste={(e) => handlePaste(e, index)}
+                    disabled={loading}
+                    inputProps={{
+                      maxLength: 1,
+                      inputMode: "text",
+                      pattern: '[A-Za-z0-9]*',
+                      autoComplete: 'off',
+                      autoCorrect: 'off',
+                      autoCapitalize: 'characters',
+                      style: { 
+                        textAlign: 'center',
+                        fontSize: '1.5rem',
+                        padding: '0.5rem',
+                        width: '3rem',
+                        height: '3rem'
+                      }
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        '&:hover fieldset': {
+                          borderColor: 'primary.main',
+                        },
+                      },
+                      '@media (max-width: 600px)': {
+                        '& .MuiOutlinedInput-root': {
+                          minWidth: '3.5rem',
+                          height: '3.5rem',
+                        }
+                      }
+                    }}
+                  />
+                ))}
+              </Box>
+              
+              <Button
+                type="submit"
+                variant="contained"
+                size="large"
+                disabled={loading || gameCodeChars.some(char => !char)}
+                startIcon={loading ? <CircularProgress size={20} /> : <Login />}
+                sx={{
+                  ...buttonStyles.primary,
+                  height: 56,
+                  width: { xs: '100%', sm: 'auto' },
+                  opacity: (loading || gameCodeChars.some(char => !char)) ? 0.6 : 1,
+                  '&.Mui-disabled': {
+                    backgroundColor: 'primary.main',
+                    color: 'white',
+                  }
+                }}
+              >
+                {loading ? 'Joining...' : 'Join'}
+              </Button>
+            </Box>
+
+            {error && (
+              <Typography color="error" textAlign="center" mb={2}>
+                {error}
+              </Typography>
+            )}
           </>
         )}
       </Box>

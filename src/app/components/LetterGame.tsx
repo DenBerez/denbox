@@ -19,12 +19,17 @@ import {
   Avatar,
   Chip,
   Fade,
+  Alert,
 } from '@mui/material';
 import { amplifyClient as client } from '@/utils/amplifyClient';
-import { updateGame, updatePlayer, createPlayer } from '@/graphql/mutations';
+import { 
+  updateGame as updateGameMutation, 
+  updatePlayer, 
+  createPlayer 
+} from '@/graphql/mutations';
 import { getPlayer, getGame, playersByGameId } from '@/graphql/queries';
 import { onCreatePlayerByGameId, onUpdatePlayerByGameId } from '@/graphql/subscriptions';
-import { GameStatus, GameType, Player } from '@/types/game';
+import { Game, GameStatus, GameType, Player } from '@/types/game';
 import { validateGameStart, validateGameSettings } from '@/utils/gameValidation';
 import PlayerList from './PlayerList';
 import GameHeader from './GameHeader';
@@ -43,6 +48,12 @@ import {
 import { GraphQLResult } from '@aws-amplify/api';
 import { playSound, Sounds } from '@/utils/soundEffects';
 import { usePlayerManagement } from '@/hooks/usePlayerManagement';
+import { WebSocketService } from '@/services/WebSocketService';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { useGameState } from '@/providers/GameStateProvider';
+import { useCurrentPlayer } from '@/hooks/useCurrentPlayer';
+import GameSettingsDialog from './GameSettingsDialog';
+import { ConnectionStateManager } from '@/utils/connectionStateManager';
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -51,84 +62,208 @@ interface LetterGameProps {
   onGameUpdate: (game: any) => void;
 }
 
-export default function LetterGameComponent({ game, onGameUpdate }: LetterGameProps) {
-  const { player, players, loading, error } = usePlayerManagement({ gameId: game.id });
-  const [timeLeft, setTimeLeft] = useState(game.timeRemaining || 60);
+export default function LetterGameComponent({ game: initialGame }) {
+  const { 
+    game,
+    players,
+    isConnected,
+    sendMessage,
+    updateGame,
+    serverTimeOffset 
+  } = useGameState();
+  const { 
+    player, 
+    loading: playerLoading, 
+    error: playerError 
+  } = usePlayerManagement({ gameId: game.id });
+  const [error, setError] = useState<string | null>(null);
+  const [timeLeft, setTimeLeft] = useState(game?.timeRemaining || 60);
   const [currentWord, setCurrentWord] = useState('');
   const [words, setWords] = useState<string[]>([]);
   const wordsRef = useRef<string[]>([]);
   const [word, setWord] = useState('');
-  const [letters, setLetters] = useState(game.currentLetters || '');
-  const [isPlaying, setIsPlaying] = useState(game.status === 'PLAYING');
+  const [letters, setLetters] = useState(game?.currentLetters || '');
+  const [isPlaying, setIsPlaying] = useState(game?.status === 'PLAYING');
   const [settings, setSettings] = useState<LetterRaceSettings>(() => {
-    if (game.settings) {
-      try {
-        return JSON.parse(game.settings) as LetterRaceSettings;
-      } catch (e) {
-        console.error('Error parsing game settings:', e);
-        return letterRaceDefaults;
-      }
+    try {
+      return JSON.parse(game.settings) || letterRaceDefaults;
+    } catch (e) {
+      console.error('Error parsing settings:', e);
+      return letterRaceDefaults;
     }
-    return letterRaceDefaults;
   });
   const [playerName, setPlayerName] = useState('');
   const [gameEngine, setGameEngine] = useState<LetterGame | null>(null);
+  const [wsError, setWsError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Update ref whenever words state changes
-  useEffect(() => {
-    wordsRef.current = words;
-  }, [words]);
+  const startRound = async () => {
+    try {
+      playSound(Sounds.START);
+      // Ensure we're using the current settings from the game state
+      const currentSettings = game.settings ? JSON.parse(game.settings) : settings;
+      
+      // Generate new letters for the round
+      const newLetters = Array(currentSettings.lettersPerRound)
+        .fill('')
+        .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
+        .join('');
 
-  useEffect(() => {
-    let timer: NodeJS.Timeout | undefined;
-    
-    if (isPlaying && timeLeft > 0) {
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          const newTime = prev - 1;
-          
-          // Play warning sound at 10% remaining time
-          if (newTime === Math.floor(settings.timePerRound * 0.1)) {
-            playSound(Sounds.WARNING);
+      // If we're in LOBBY, start at round 1, otherwise increment
+      const nextRound = game.status === GameStatus.LOBBY ? 1 : game.currentRound + 1;
+
+      const result = await client.graphql({
+        query: updateGameMutation,
+        variables: {
+          input: {
+            id: game.id,
+            status: GameStatus.PLAYING,
+            currentRound: nextRound,
+            timeRemaining: currentSettings.timePerRound,
+            currentLetters: newLetters,
+            roundStartTime: new Date().toISOString()
           }
-          
-          if (newTime <= 0) {
-            if (timer) clearInterval(timer);
-            endRound();
-          }
-          return Math.max(newTime, 0);
-        });
-      }, 1000);
+        }
+      });
+
+      // Reset local state
+      setWords([]);
+      setWord('');
+      setLetters(newLetters);
+      setIsPlaying(true);
+      setTimeLeft(currentSettings.timePerRound);
+      setSettings(currentSettings);
+
+      updateGame(result?.data?.updateGame);
+    } catch (error) {
+      console.error('Error starting round:', error);
+      throw error;
     }
+  };
 
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isPlaying]);
-
-  // Add debug logging
   useEffect(() => {
-    console.log('Current player:', player);
-    console.log('All players:', players);
-  }, [player, players]);
+    const debugState = async () => {
+      console.log('Game State:', {
+        gameId: game?.id,
+        playerId: player?.id,
+        isConnected,
+        totalPlayers: players.length
+      });
+    };
+    
+    debugState();
+  }, [game?.id, player?.id, isConnected, players]);
+
+  const handleJoinGame = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    console.log('Join game button clicked');
+    
+    try {
+      setError(null);
+      setLoading(true);
+      
+      const newPlayer = await createNewPlayer();
+      console.log('New player created:', newPlayer);
+      
+      // Update local state first
+      const updatedPlayers = [...players, newPlayer];
+      
+      try {
+        // Update game state directly
+        updateGame({
+          ...game,
+          players: updatedPlayers
+        });
+
+        // Try to send WebSocket update in the background
+        setTimeout(() => {
+          sendMessage({
+            type: 'PLAYER_UPDATE',
+            gameId: game.id,
+            data: newPlayer
+          }).catch(err => {
+            console.warn('WebSocket message failed:', err);
+            // Retry once after a short delay
+            setTimeout(() => {
+              sendMessage({
+                type: 'PLAYER_UPDATE',
+                gameId: game.id,
+                data: newPlayer
+              }).catch(err => console.warn('WebSocket retry failed:', err));
+            }, 1000);
+          });
+        }, 0);
+        
+      } catch (wsError) {
+        console.warn('WebSocket update failed:', wsError);
+        // Continue anyway since the player was created successfully
+      }
+      
+    } catch (error) {
+      console.error('Error joining game:', error);
+      setError('Failed to join game. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createNewPlayer = async () => {
+    try {
+      console.log('Creating new player for game:', game.id);
+      
+      const result = await client.graphql({
+        query: createPlayer,
+        variables: {
+          input: {
+            gameId: game.id,
+            name: 'Player ' + Math.floor(Math.random() * 1000),
+            score: 0,
+            currentWords: [],
+            isHost: players.length === 0,
+            isConfirmed: true,
+            gamePlayersId: game.id
+          }
+        }
+      });
+      
+      console.log('Created new player:', result);
+      return result.data.createPlayer;
+      
+    } catch (err) {
+      console.error('Error creating player:', err);
+      throw err;
+    }
+  };
 
   useEffect(() => {
     if (game.status === GameStatus.ROUND_END) {
       setIsPlaying(false);
       setTimeLeft(0);
-  
     } else if (game.status === GameStatus.PLAYING) {
       setIsPlaying(true);
-      setTimeLeft(game.timeRemaining || settings.timePerRound);
+      
+      // Reset the timer when a new round starts
+      if (game.roundStartTime) {
+        const startTime = new Date(game.roundStartTime).getTime();
+        const currentTime = Date.now();
+        const elapsedSeconds = Math.floor((currentTime - startTime) / 1000);
+        const remainingTime = Math.max(0, settings.timePerRound - elapsedSeconds);
+        
+        setTimeLeft(remainingTime);
+      } else {
+        // Fallback if roundStartTime is not available
+        setTimeLeft(game.timeRemaining || settings.timePerRound);
+      }
+      
       setLetters(game.currentLetters || '');
       
       // Only reset words if this is a new round starting
-      // Check if the letters have changed, indicating a new round
       if (letters !== game.currentLetters) {
         setWords([]);
       }
     }
-  }, [game.status, game.currentLetters]);
+  }, [game.status, game.currentLetters, game.roundStartTime, game.timeRemaining, settings.timePerRound]);
 
   useEffect(() => {
     setGameEngine(new LetterGame(game));
@@ -151,52 +286,21 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     }
   }, [game.settings]);
 
+  useEffect(() => {
+    // Keep wordsRef in sync with words state
+    wordsRef.current = words;
+  }, [words]);
 
-
-
-  const startRound = async () => {
-    try {
-      playSound(Sounds.START);
-      // Ensure we're using the current settings from the game state
-      const currentSettings = game.settings ? JSON.parse(game.settings) : settings;
+  useEffect(() => {
+    if (game.status === GameStatus.PLAYING && game.roundStartTime) {
+      const startTime = new Date(game.roundStartTime).getTime();
+      const currentTime = Date.now() - serverTimeOffset;
+      const elapsedSeconds = Math.floor((currentTime - startTime) / 1000);
+      const remainingTime = Math.max(0, settings.timePerRound - elapsedSeconds);
       
-      // Generate new letters for the round
-      const newLetters = Array(currentSettings.lettersPerRound)
-        .fill('')
-        .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
-        .join('');
-
-      // If we're in LOBBY, start at round 1, otherwise increment
-      const nextRound = game.status === GameStatus.LOBBY ? 1 : game.currentRound + 1;
-
-      const result = await client.graphql({
-        query: updateGame,
-        variables: {
-          input: {
-            id: game.id,
-            status: GameStatus.PLAYING,
-            currentRound: nextRound,
-            timeRemaining: currentSettings.timePerRound,
-            currentLetters: newLetters,
-            roundStartTime: new Date().toISOString()
-          }
-        }
-      });
-
-      // Reset local state
-      setWords([]);
-      setWord('');
-      setLetters(newLetters);
-      setIsPlaying(true);
-      setTimeLeft(currentSettings.timePerRound);
-      setSettings(currentSettings);
-
-      onGameUpdate(result?.data?.updateGame);
-    } catch (error) {
-      console.error('Error starting round:', error);
-      throw error;
+      setTimeLeft(remainingTime);
     }
-  };
+  }, [game.status, game.roundStartTime, settings.timePerRound, serverTimeOffset]);
 
   const handleWordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -245,6 +349,21 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       setWord('');
       setError(null);
       
+      // Notify other players via WebSocket
+      sendMessage({
+        type: 'GAME_UPDATE',
+        gameId: game.id,
+        playerId: player?.id,
+        data: {
+          id: game.id,
+          status: GameStatus.PLAYING,
+          currentRound: game.currentRound,
+          timeRemaining: timeLeft,
+          currentLetters: letters,
+          roundStartTime: game.roundStartTime,
+          currentWords: updatedWords
+        }
+      });
     } catch (error) {
       console.error('Error submitting word:', error);
       setError('Failed to submit word. Please try again.');
@@ -254,7 +373,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
   const handleSettingsUpdate = async (newSettings: LetterRaceSettings) => {
     try {
       await client.graphql({
-        query: updateGame,
+        query: updateGameMutation,
         variables: {
           input: {
             id: game.id,
@@ -280,9 +399,11 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
         .map(() => LETTERS.charAt(Math.floor(Math.random() * LETTERS.length)))
         .join('');
       
+      const roundStartTime = new Date().toISOString();
+      
       // Update game status and round
       const result = await client.graphql({
-        query: updateGame,
+        query: updateGameMutation,
         variables: {
           input: {
             id: game.id,
@@ -290,23 +411,37 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
             currentRound: nextRound,
             timeRemaining: settings.timePerRound,
             currentLetters: newLetters,
-            settings: JSON.stringify(settings)
+            settings: JSON.stringify(settings),
+            roundStartTime: roundStartTime
           }
         }
-      }) as GraphQLResult<{
-        updateGame: Game;
-      }>;
+      });
       
-      // Update local state AFTER game update is successful
-      onGameUpdate(result.data.updateGame);
+      // Update local state
+      if (result.data?.updateGame) {
+        updateGame(result.data.updateGame);
+      }
+      
       setIsPlaying(true);
       setTimeLeft(settings.timePerRound);
       setLetters(newLetters);
-      
-      // Reset words LAST, after all other state updates
       setWords([]);
       setWord('');
       
+      // Notify other players via WebSocket
+      sendMessage({
+        type: 'GAME_UPDATE',
+        gameId: game.id,
+        data: {
+          id: game.id,
+          status: GameStatus.PLAYING,
+          currentRound: nextRound,
+          timeRemaining: settings.timePerRound,
+          currentLetters: newLetters,
+          settings: JSON.stringify(settings),
+          roundStartTime: roundStartTime
+        }
+      });
     } catch (error) {
       console.error('Error starting next round:', error);
     }
@@ -356,7 +491,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       
       // Update game state
       const result = await client.graphql({
-        query: updateGame,
+        query: updateGameMutation,
         variables: {
           input: {
             id: game.id,
@@ -369,7 +504,18 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       }>;
 
       console.log('Game update result:', result);
-      onGameUpdate(result.data.updateGame);
+      updateGame(result.data.updateGame);
+
+      // Notify other players via WebSocket
+      sendMessage({
+        type: 'GAME_UPDATE',
+        gameId: game.id,
+        data: {
+          id: game.id,
+          status: isLastRound ? GameStatus.FINISHED : GameStatus.ROUND_END,
+          timeRemaining: 0
+        }
+      });
     } catch (error) {
       console.error('Error ending round:', error);
     }
@@ -382,7 +528,7 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
     try {
       // Update game status to LOBBY while preserving settings and players
       const result = await client.graphql({
-        query: updateGame,
+        query: updateGameMutation,
         variables: {
           input: {
             id: game.id,
@@ -402,11 +548,50 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
       setWords([]);
       setWord('');
       
-      onGameUpdate(result.data.updateGame);
+      updateGame(result.data.updateGame);
     } catch (error) {
       console.error('Error returning to lobby:', error);
     }
   };
+
+  useEffect(() => {
+    if (game) {
+      document.title = `${game.code} | ${game.status === 'PLAYING' ? 'Playing' : 'Lobby'} | Denbox`;
+    }
+  }, [game?.code, game?.status]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    
+    if (timeLeft > 0 && game.status === GameStatus.PLAYING) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            // Time's up - end the round
+            endRound();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    
+    // Cleanup function to clear the interval when component unmounts
+    return () => clearInterval(timer);
+  }, [timeLeft, game.status, game.currentRound]);
+
+  if (playerLoading || !isConnected) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+        <CircularProgress />
+        {(wsError || playerError) && (
+          <Typography color="error" sx={{ ml: 2 }}>
+            {wsError || playerError}
+          </Typography>
+        )}
+      </Box>
+    );
+  }
 
   if (!game.gameType) return null;
 
@@ -549,13 +734,13 @@ export default function LetterGameComponent({ game, onGameUpdate }: LetterGamePr
                 onChange={(e) => {
                   const input = e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase();
                   setWord(input);
-                  setError(null);
+                  setFormError(null);
                 }}
                 variant="outlined"
                 autoComplete="off"
                 disabled={!isPlaying}
-                error={!!error}
-                helperText={error || `Word must be at least ${settings.minWordLength} letters and contain the letters in order`}
+                error={!!formError}
+                helperText={formError || `Word must be at least ${settings.minWordLength} letters and contain the letters in order`}
                 sx={{
                   mb: 2,
                   '& .MuiOutlinedInput-root': {
