@@ -37,6 +37,8 @@ export interface Player {
   gameId: string;
   currentWords?: string[];
   score?: number;
+  isConfirmed?: boolean;
+  avatarColor?: string;
 }
 
 export interface GameTypeConfig {

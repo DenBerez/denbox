@@ -163,4 +163,17 @@ export class WebSocketService {
       console.error('Error handling WebSocket message:', error);
     }
   }
+
+  private getConnectionUrl(): string {
+    // Implementation of getConnectionUrl method
+    return '';
+  }
+
+  private isConnected(): boolean {
+    return this.connectionState === WebSocketConnectionState.CONNECTED;
+  }
+
+  private isConnecting(): boolean {
+    return this.connectionState === WebSocketConnectionState.CONNECTING;
+  }
 }

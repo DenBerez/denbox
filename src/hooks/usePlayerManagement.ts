@@ -28,42 +28,44 @@ export function usePlayerManagement({ gameId }: UsePlayerManagementProps) {
   }, [currentPlayer]);
 
   useEffect(() => {
-    setPlayers(globalPlayers);
+    if (globalPlayers && globalPlayers.length > 0) {
+      setPlayers(globalPlayers);
+    }
   }, [globalPlayers]);
 
   return {
     player,
     players,
-    loading,
+    loading: loading || !currentPlayer,
     error,
     isConnected
   };
 }
 
-const createNewPlayer = async (gameId: string, existingPlayers: Player[]) => {
-  const isHost = existingPlayers.length === 0;
-  const playerName = `Player ${Math.floor(Math.random() * 1000)}`;
-  
+// Example of how player creation might be fixed
+export async function createNewPlayer(gameId, playerName) {
   try {
-    const result = await client.graphql({
+    const response = await client.graphql({
       query: createPlayer,
       variables: {
         input: {
           gameId,
           name: playerName,
           score: 0,
-          isHost,
-          isConfirmed: false,
-          currentWords: [],
-          gamePlayersId: gameId
+          isHost: false,
+          isConfirmed: true,
+          currentWords: []
         }
       }
     });
-    const newPlayer = result.data.createPlayer;
-
-    return newPlayer;
+    
+    // Store player ID in session storage instead of localStorage
+    // This makes it available in the current window only
+    sessionStorage.setItem('currentPlayerId', response.data.createPlayer.id);
+    
+    return response.data.createPlayer;
   } catch (error) {
-    console.error('Error in createNewPlayer:', error);
+    console.error('Error creating player:', error);
     throw error;
   }
-}; 
+}

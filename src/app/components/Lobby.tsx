@@ -7,6 +7,9 @@ import {
   Button,
   Alert,
   CircularProgress,
+  Paper,
+  Grid,
+  Divider
 } from '@mui/material';
 import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updateGame } from '@/graphql/mutations';
@@ -14,52 +17,52 @@ import { validateGameStart } from '@/utils/gameValidation';
 import GameSettings from './GameSettings';
 import PlayerList from './PlayerList';
 import { getDefaultSettings } from '@/constants/gameSettings';
-import { Game, GameType, Player } from '@/types/game';
+import { Game, GameType, Player, GameStatus } from '@/types/game';
 import { LetterRaceSettings } from '@/types/settings';
-import { LetterGame } from '@/lib/games/LetterGame';
+import { useGameState } from '@/hooks/useGameState';
+import PlayerNameInput from './PlayerNameInput';
+import GameHeader from './GameHeader';
 import GameSettingsDialog from './GameSettingsDialog';
-import SettingsIcon from '@mui/icons-material/Settings';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { paperStyles, buttonStyles, textGradientStyles } from '@/constants/styles';
-import { useGameState } from '@/providers/GameStateProvider';
-import { GameStatus } from '@/types/game';
 
 interface LobbyProps {
   game: Game;
-  player: Player;
-  players: Player[];
   onStartGame: () => void;
-  settings: LetterRaceSettings;
 }
 
-export default function Lobby({ game, player, players, onStartGame, settings }: LobbyProps) {
-  const { isConnected, sendMessage } = useGameState();
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [localSettings, setLocalSettings] = useState(() => {
-    if (game.settings) {
-      try {
-        return JSON.parse(game.settings);
-      } catch (e) {
-        console.error('Error parsing game settings:', e);
-        return getDefaultSettings(game.gameType);
-      }
-    }
-    return getDefaultSettings(game.gameType);
-  });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [localPlayers, setLocalPlayers] = useState<Player[]>(players);
+export default function Lobby({ game, onStartGame }: LobbyProps) {
+  const {
+    players,
+    isConnected,
+    isLoading,
+    error: gameStateError,
+    updateGame: updateGameState,
+    currentPlayer
+  } = useGameState();
 
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [settings, setSettings] = useState<LetterRaceSettings | null>(null);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+
+  // Parse settings from game object
   useEffect(() => {
-    if (!player) {
-      console.error('No player data found');
-      setError('Player data not found. Please try rejoining the game.');
+    if (game && game.settings) {
+      try {
+        const parsedSettings = JSON.parse(game.settings);
+        setSettings(parsedSettings);
+      } catch (e) {
+        console.error('Failed to parse game settings:', e);
+        setLocalError('Invalid game settings');
+      }
+    } else {
+      // Use default settings if none are provided
+      setSettings(getDefaultSettings(game.gameType) as LetterRaceSettings);
     }
-  }, [player]);
+  }, [game]);
 
   const handleUpdateSettings = async (newSettings: LetterRaceSettings) => {
-    setError(null);
-    setLocalSettings(newSettings);
+    setLocalError(null);
+    setSettings(newSettings);
     try {
       await client.graphql({
         query: updateGame,
@@ -74,130 +77,136 @@ export default function Lobby({ game, player, players, onStartGame, settings }: 
       });
     } catch (error) {
       console.error('Error updating settings:', error);
-      setError('Failed to update game settings');
+      setLocalError('Failed to update game settings');
     }
   };
 
-  const handlePlayersUpdate = (updatedPlayers: Player[]) => {
-    setLocalPlayers(updatedPlayers);
-  };
-
-  const handleStartGame = async (players: Player[]) => {
-    if (!player?.id) {
-      setError('Player information is missing. Please refresh the page.');
-      return;
-    }
-    
-    if (!localSettings) {
-      setError('Game settings not found');
+  const handleStartGame = async () => {
+    if (!currentPlayer?.id) {
+      setLocalError('Player information is missing. Please refresh the page.');
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (!settings) {
+      setLocalError('Game settings not found');
+      return;
+    }
+
+    setIsStarting(true);
+    setLocalError(null);
 
     try {
-      const validationResult = validateGameStart(players, localSettings);
+      const validationResult = validateGameStart(players, settings);
       if (!validationResult.isValid) {
-        setError(validationResult.errors[0]);
-        setLoading(false);
+        setLocalError(validationResult.errors[0]);
+        setIsStarting(false);
         return;
       }
 
-      // Broadcast game start via WebSocket
-      await sendMessage({
-        type: 'GAME_UPDATE',
-        gameId: game.id,
-        data: {
-          status: GameStatus.PLAYING,
-          timeRemaining: localSettings.timePerRound,
-          currentRound: 1
-        }
+      // Update game status using GraphQL mutation
+      await updateGameState({
+        status: GameStatus.PLAYING,
+        timeRemaining: settings.timePerRound,
+        currentRound: 1
       });
 
       onStartGame();
     } catch (error) {
       console.error('Error starting game:', error);
-      setError('Failed to start game');
+      setLocalError('Failed to start game');
     } finally {
-      setLoading(false);
+      setIsStarting(false);
     }
   };
 
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <PlayerList 
-        gameId={game.id} 
-        currentPlayer={player}
-        onPlayersUpdate={handlePlayersUpdate}
-      />
-      
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'flex-end', 
-        gap: 2,
-        flexWrap: 'wrap'
-      }}>
-        <Button
-          variant="outlined"
-          onClick={() => setSettingsOpen(true)}
-          startIcon={<SettingsIcon />}
-          sx={{
-            borderRadius: 2,
-            px: 3,
-            py: 1.5,
-            fontSize: '1rem',
-            fontWeight: 600,
-            '&:hover': {
-              borderColor: 'primary.main',
-              bgcolor: 'rgba(33, 150, 243, 0.1)'
-            }
-          }}
-        >
-          Game Settings
-        </Button>
-        
-        {player?.isHost && (
-          <Button
-            variant="contained"
-            onClick={() => handleStartGame(localPlayers)}
-            size="large"
-            startIcon={loading ? <CircularProgress size={24} /> : <PlayArrowIcon />}
-            disabled={loading}
-            sx={{ 
-              ...buttonStyles.primary,
-              minWidth: 180
-            }}
-          >
-            {loading ? 'Starting...' : 'Start Game'}
-          </Button>
-        )}
+  // Show loading state
+  if (isLoading || isStarting) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+        <CircularProgress size={60} />
+        <Typography variant="h6" sx={{ mt: 2 }}>
+          {isStarting ? 'Starting game...' : 'Loading lobby...'}
+        </Typography>
       </Box>
+    );
+  }
 
-      <GameSettingsDialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        gameType={game.gameType}
-        settings={localSettings}
-        onUpdateSettings={handleUpdateSettings}
-        isHost={player?.isHost}
-      />
+  // Show error state
+  if (gameStateError || localError) {
+    return (
+      <Alert severity="error" sx={{ mb: 3 }}>
+        {gameStateError || localError}
+      </Alert>
+    );
+  }
 
-      {error && (
-        <Alert 
-          severity="error" 
-          sx={{ 
-            borderRadius: 2,
-            bgcolor: 'error.dark',
-            color: 'error.contrastText',
-            p: 2,
-            '& .MuiAlert-icon': {
-              color: 'error.contrastText'
-            }
-          }}
-        >
-          {error}
-        </Alert>
+  // Show waiting state if we don't have settings yet
+  if (!settings) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+        <CircularProgress size={60} />
+        <Typography variant="h6" sx={{ mt: 2 }}>
+          Loading game settings...
+        </Typography>
+      </Box>
+    );
+  }
+
+  const canStart = players && players.length >= (settings?.minPlayers || 2);
+
+  return (
+    <Box sx={{ width: '100%' }}>
+      <Grid container >
+        <Grid item xs={12} md={12}>
+          <GameHeader game={game} />
+        </Grid>
+        <Grid item xs={12} md={12}>
+          <Box sx={{
+            width: '100%',
+            // minHeight: '300px', // Set a minimum height for the player list area
+          }}>
+            <PlayerList
+              players={players || []}
+              currentPlayerId={currentPlayer?.id}
+              showScores={false}
+            />
+          </Box>
+
+          {currentPlayer?.isHost && (
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2 }}>
+              <Button
+                variant="outlined"
+                color="primary"
+                size="large"
+                onClick={() => setSettingsDialogOpen(true)}
+              >
+                Game Settings
+              </Button>
+
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                onClick={handleStartGame}
+                disabled={!canStart || !isConnected || isStarting}
+              >
+                {canStart ? 'Start Game' : `Need at least ${settings?.minPlayers || 2} players`}
+              </Button>
+            </Box>
+          )}
+        </Grid>
+      </Grid>
+
+      {/* Game Settings Dialog */}
+      {settings && (
+        <GameSettingsDialog
+          open={settingsDialogOpen}
+          onClose={() => setSettingsDialogOpen(false)}
+          gameType={game.gameType}
+          settings={settings}
+          onUpdateSettings={handleUpdateSettings}
+          isHost={currentPlayer?.isHost || false}
+        />
       )}
     </Box>
   );

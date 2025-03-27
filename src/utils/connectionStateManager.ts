@@ -22,22 +22,22 @@ export class ConnectionStateManager {
   }
 
   async getOrCreateConnection(gameId: string, playerId?: string): Promise<WebSocketService> {
-    const connectionKey = playerId ? `${gameId}-${playerId}` : gameId;
+    const connectionKey = `${gameId}:${playerId || 'anonymous'}`;
     
-    if (this.connections.has(connectionKey)) {
-      const existingConnection = this.connections.get(connectionKey)!;
-      if (existingConnection.connectionState === WebSocketConnectionState.CONNECTED) {
-        return existingConnection;
-      }
-      // If connection exists but is disconnected, remove it
-      this.removeConnection(gameId, playerId);
+    // Check if we already have an active connection
+    if (this.connections.has(connectionKey) && this.connections.get(connectionKey)!.connectionState === WebSocketConnectionState.CONNECTED) {
+      console.log('Reusing existing WebSocket connection');
+      return this.connections.get(connectionKey)!;
     }
-
-    // Create new connection
-    const connection = new WebSocketService(gameId, playerId || '');
     
-    await connection.connect();
+    // If we have a connection that's in connecting state, wait for it
+    if (this.connections.has(connectionKey) && this.connections.get(connectionKey)!.connectionState === WebSocketConnectionState.CONNECTING) {
+      console.log('Connection already in progress, waiting...');
+      return this.connections.get(connectionKey)!;
+    }
     
+    console.log(`Creating new WebSocket connection for game: ${gameId}, player: ${playerId || 'anonymous'}`);
+    const connection = new WebSocketService(gameId, playerId);
     this.connections.set(connectionKey, connection);
     this.connectionStatus.set(connectionKey, 'connected');
     

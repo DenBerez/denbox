@@ -1,77 +1,98 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
-import { Container } from '@mui/material';
-import { Game, GameType } from '@/types/game';
+import React from 'react';
+import { useEffect, useState } from 'react';
+import { Box, CircularProgress, Typography } from '@mui/material';
 import { amplifyClient as client } from '@/utils/amplifyClient';
 import { getGame } from '@/graphql/queries';
+import { Game, GameStatus } from '@/types/game';
 import LetterGameComponent from '@/app/components/LetterGame';
-import PictureGameComponent from '@/app/components/PictureGame';
-import { useRouter } from 'next/navigation';
-import { WebSocketErrorBoundary } from '@/components/WebSocketErrorBoundary';
 import { GameStateProvider } from '@/providers/GameStateProvider';
+import DebugInfo from '@/app/components/DebugInfo';
+import Lobby from '@/app/components/Lobby';
+import PictureGameComponent from '@/app/components/PictureGame';
 
-interface GamePageProps {
-  params: Promise<{
-    id: string;
-  }>;
-}
+export default function GamePage({ params }: { params: { id: string } }) {
+  // Unwrap params with React.use()
+  const resolvedParams = React.use(params);
+  const gameId = resolvedParams.id;
 
-export default function GamePage({ params }: GamePageProps) {
-  const resolvedParams = use(params);
   const [game, setGame] = useState<Game | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!resolvedParams?.id) {
-      router.push('/');
-      return;
-    }
-
     const fetchGame = async () => {
       try {
         const result = await client.graphql({
           query: getGame,
-          variables: { id: resolvedParams?.id }
+          variables: { id: gameId }
         });
-        console.log('Fetched game:', result.data.getGame); // Add logging
+
+        console.log('Fetched game:', result.data.getGame);
         setGame(result.data.getGame);
       } catch (error) {
         console.error('Error fetching game:', error);
+        setError('Failed to load game');
       } finally {
         setLoading(false);
       }
     };
 
     fetchGame();
-  }, [resolvedParams?.id]);
+  }, [gameId]);
 
-  if (loading) return <div>Loading...</div>;
-  if (!game) return <div>Game not found</div>;
-  
-  console.log('Rendering game with status:', game.status); // Add logging
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+        <CircularProgress size={60} />
+        <Typography variant="h6" sx={{ mt: 2 }}>
+          Loading game...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (error || !game) {
+    return (
+      <Box sx={{ p: 3, textAlign: 'center' }}>
+        <Typography variant="h5" color="error">
+          {error || 'Game not found'}
+        </Typography>
+      </Box>
+    );
+  }
+
+  console.log('Rendering game with status:', game.status);
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <GameStateProvider initialGame={game}>
-        <WebSocketErrorBoundary 
-          gameId={game.id}
-          onError={(error) => console.error('Game connection error:', error)}
-        >
-          {game.gameType === GameType.LETTER_RACE ? (
-            <LetterGameComponent 
-              game={game} 
-              onGameUpdate={(updatedGame) => setGame(updatedGame)} 
-            />
-          ) : (
-            <PictureGameComponent 
-              game={game} 
-              onGameUpdate={(updatedGame) => setGame(updatedGame)} 
-            />
-          )}
-        </WebSocketErrorBoundary>
-      </GameStateProvider>
-    </Container>
+    <GameStateProvider gameId={gameId}>
+      {/* <DebugInfo /> */}
+      {game.status === 'LOBBY' ? (
+        <Box sx={{
+          p: 3,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '80%',
+          maxWidth: '1200px',
+          mx: 'auto',
+        }}>
+          <Lobby
+            game={game}
+            onStartGame={() => {
+              console.log('Starting game');
+            }}
+          />
+        </Box>
+      ) : (
+        game.gameType === 'LETTER_RACE' ? (
+          <LetterGameComponent game={game} />
+        ) : (
+          <PictureGameComponent game={game} onGameUpdate={() => { }} />
+        )
+      )}
+    </GameStateProvider>
   );
 }

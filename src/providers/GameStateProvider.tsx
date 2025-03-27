@@ -1,521 +1,448 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { WebSocketService } from '@/services/WebSocketService';
-import { ConnectionStateManager } from '@/utils/connectionStateManager';
-import { Game, Player, GameStatus, WebSocketMessage } from '@/types/game';
-import { amplifyClient as client } from '@/utils/amplifyClient';
-import { playersByGameId, getPlayer, getGame } from '@/graphql/queries';
-import { createPlayer, updatePlayer, updateGame as updateGameMutation } from '@/graphql/mutations';
+'use client';
 
-interface GameStateContextType {
-  game: Game;
+import React, { createContext, useState, useEffect, useContext, ReactNode, useCallback } from 'react';
+import { Game, Player, GameStatus } from '@/types/game';
+import { amplifyClient as client } from '@/utils/amplifyClient';
+import { playersByGameId, getGame, getPlayer } from '@/graphql/queries';
+import { updateGame as updateGameMutation, createPlayer, updatePlayer } from '@/graphql/mutations';
+import { SubscriptionService } from '@/services/SubscriptionService';
+import { debounce } from 'lodash';
+
+export const GameStateContext = createContext<{
+  game: Game | null;
   players: Player[];
-  isConnected: boolean;
-  sendMessage: (message: any) => Promise<void>;
+  currentPlayer: Player | null;
+  isLoading: boolean;
+  error: string | null;
   updateGame: (updates: Partial<Game>) => Promise<void>;
   serverTimeOffset: number;
-  isLoading: boolean;
-  currentPlayer: Player | null;
+  setError?: (error: string | null) => void;
+}>({
+  game: null,
+  players: [],
+  currentPlayer: null,
+  isLoading: true,
+  error: null,
+  updateGame: async () => {},
+  serverTimeOffset: 0
+});
+
+interface GameStateProviderProps {
+  children: ReactNode;
+  gameId: string;
 }
 
-const GameStateContext = createContext<GameStateContextType | null>(null);
-
-// Create a global initialization tracker to prevent duplicate initializations
-const initializedGames = new Map<string, { playerId: string | null }>();
-
-export function GameStateProvider({ children, initialGame }: { children: React.ReactNode, initialGame: Game }) {
-  const [game, setGame] = useState<Game>(initialGame);
+export function GameStateProvider({ children, gameId }: GameStateProviderProps) {
+  const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
-  const MAX_RECONNECT_ATTEMPTS = 3;
-  const wsManager = ConnectionStateManager.getInstance();
-  const playerInitialized = useRef(false);
-  const initializationInProgress = useRef(false);
-  const mountedRef = useRef(true);
+  const [serverTimeOffset, setServerTimeOffset] = useState(0);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [isCreatingPlayer, setIsCreatingPlayer] = useState(false);
 
-  // Add this function BEFORE initializePlayer
-  const broadcastPlayerJoin = useCallback(async (player: Player) => {
-    if (!game?.id || !player?.id) return;
+  // Fetch game data
+  useEffect(() => {
+    async function fetchGameData() {
+      try {
+        console.log('Fetching game data for game:', gameId);
+        const result = await client.graphql({
+          query: getGame,
+          variables: { id: gameId }
+        });
+        
+        if (result.data.getGame) {
+          setGame(result.data.getGame);
+          console.log('Game data fetched:', result.data.getGame);
+        } else {
+          setError('Game not found');
+        }
+      } catch (error) {
+        console.error('Error fetching game:', error);
+        setError('Failed to load game data');
+      }
+    }
+
+    if (gameId) {
+      fetchGameData();
+    }
+  }, [gameId]);
+
+  // Fetch players
+  useEffect(() => {
+    let isMounted = true;
+    
+    async function fetchPlayers() {
+      if (!gameId) return;
+      
+      try {
+        const result = await client.graphql({
+          query: playersByGameId,
+          variables: { gameId }
+        });
+        
+        if (!isMounted) return;
+        
+        const fetchedPlayers = result.data.playersByGameId.items;
+        setPlayers(fetchedPlayers);
+        console.log(`Fetched ${fetchedPlayers.length} players for game:`, gameId);
+        
+        // Check for stored player ID
+        const storedPlayerId = localStorage.getItem(`player_${gameId}`);
+        if (storedPlayerId) {
+          const player = fetchedPlayers.find(p => p.id === storedPlayerId);
+          if (player) {
+            setCurrentPlayer(player);
+            setPlayerId(player.id);
+            console.log('Found existing player:', player);
+          } else {
+            // Player ID in localStorage not found in fetched players
+            console.log('Stored player ID not found, creating new player');
+            if (!isCreatingPlayer) {
+              createPlayerIfNeeded();
+            }
+          }
+        } else {
+          // No player ID in localStorage, create new player
+          console.log('No stored player ID, creating new player');
+          if (!isCreatingPlayer) {
+            createPlayerIfNeeded();
+          }
+        }
+        
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error fetching players:', error);
+        setError('Failed to load players');
+        setIsLoading(false);
+      }
+    }
+
+    fetchPlayers();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [gameId, game]);
+
+  // Create a new player for the game
+  const createPlayerIfNeeded = async () => {
+    // Check if we're already creating a player
+    if (isCreatingPlayer) {
+      return;
+    }
+    
+    setIsCreatingPlayer(true);
     
     try {
-      const connection = await wsManager.getOrCreateConnection(game.id, player.id);
-      await connection.send({
-        type: 'PLAYER_JOIN',
-        gameId: game.id,
-        data: player
+      // Get the latest game data to check the hostId
+      const gameResult = await client.graphql({
+        query: getGame,
+        variables: { id: gameId }
       });
-    } catch (error) {
-      console.error('Failed to broadcast player join:', error);
-    }
-  }, [game?.id]);
-
-  // Initialize player first
-  const initializePlayer = useCallback(async () => {
-    // Check if we already have a player ID in localStorage
-    const storedPlayerId = localStorage.getItem(`player_${game.id}`);
-    
-    if (storedPlayerId) {
-      try {
-        console.log(`Found stored player ID: ${storedPlayerId} for game: ${game.id}`);
-        const result = await client.graphql({
+      
+      const currentGame = gameResult.data.getGame;
+      if (!currentGame) {
+        setError('Game not found');
+        return;
+      }
+      
+      // Check for stored player ID
+      const storedPlayerId = localStorage.getItem(`player_${gameId}`);
+      
+      // If we have a stored player ID, verify if it exists
+      if (storedPlayerId) {
+        const playerResult = await client.graphql({
           query: getPlayer,
           variables: { id: storedPlayerId }
         });
-        const existingPlayer = result.data.getPlayer;
-        if (existingPlayer) {
-          console.log(`Successfully retrieved existing player: ${existingPlayer.id}`);
-          if (mountedRef.current) {
-            setCurrentPlayer(existingPlayer);
-          }
-          return existingPlayer;
+        
+        const existingPlayer = playerResult.data.getPlayer;
+        
+        if (existingPlayer && existingPlayer.gameId === gameId) {
+          console.log('Found existing player:', existingPlayer);
+          setCurrentPlayer(existingPlayer);
+          setPlayerId(existingPlayer.id);
+          setIsCreatingPlayer(false);
+          return;
         }
-      } catch (error) {
-        console.warn('Stored player not found:', error);
-        // Clear invalid player ID from storage
-        localStorage.removeItem(`player_${game.id}`);
+        
+        // If player ID exists but doesn't match this game, clear it
+        localStorage.removeItem(`player_${gameId}`);
       }
-    }
-
-    // Check if we already have a player ID in the global map
-    const existingInitialization = initializedGames.get(game.id);
-    if (existingInitialization?.playerId) {
-      try {
-        console.log(`Found player ID in global map: ${existingInitialization.playerId}`);
-        const result = await client.graphql({
-          query: getPlayer,
-          variables: { id: existingInitialization.playerId }
-        });
-        const existingPlayer = result.data.getPlayer;
-        if (existingPlayer) {
-          console.log(`Successfully retrieved existing player from global map: ${existingPlayer.id}`);
-          if (mountedRef.current) {
-            setCurrentPlayer(existingPlayer);
-          }
-          return existingPlayer;
-        }
-      } catch (error) {
-        console.warn('Player from global map not found:', error);
-        // Remove invalid player ID from global map
-        initializedGames.delete(game.id);
-      }
-    }
-
-    // Get the game to check the hostId
-    try {
-      const gameResult = await client.graphql({
-        query: getGame,
-        variables: { id: game.id }
-      });
-      const currentGame = gameResult.data.getGame;
       
-      // Get existing players
+      // Fetch all players to determine if we need to create a host
       const playersResult = await client.graphql({
         query: playersByGameId,
-        variables: { gameId: game.id }
+        variables: { gameId }
       });
-      const existingPlayers = playersResult.data.playersByGameId.items || [];
-      console.log(`Found ${existingPlayers.length} existing players for game: ${game.id}`);
       
-      // Determine if this should be the host
-      // If no players exist AND this game doesn't have a host player yet
-      const shouldBeHost = existingPlayers.length === 0 && 
-                           (!currentGame.hostId || currentGame.hostId === game.id);
+      const existingPlayers = playersResult.data.playersByGameId.items;
       
-      console.log(`Creating new player for game: ${game.id}, shouldBeHost: ${shouldBeHost}`);
+      // Check if there's already a host among existing players
+      const existingHost = existingPlayers.find(p => p.isHost);
       
-      // Create new player
-      const result = await client.graphql({
+      // Determine if this player should be host
+      // Modified condition: Make first player host if no valid host exists
+      const needsHost = existingPlayers.length === 0 || !existingHost;
+      
+      console.log(`Creating new player (isHost: ${needsHost}, players: ${existingPlayers.length}, existingHost: ${!!existingHost})`);
+      
+      const newPlayer = await client.graphql({
         query: createPlayer,
         variables: {
           input: {
-            gameId: game.id,
+            gameId,
             name: `Player ${Math.floor(Math.random() * 1000)}`,
             score: 0,
-            isHost: shouldBeHost,
-            currentWords: [],
-            gamePlayersId: game.id
+            isHost: needsHost,
+            isConfirmed: false
           }
         }
       });
       
-      const newPlayer = result.data.createPlayer;
-      console.log(`New player created: ${newPlayer.id}, isHost: ${newPlayer.isHost}`);
-      
-      // Store player ID in localStorage and global map
-      localStorage.setItem(`player_${game.id}`, newPlayer.id);
-      initializedGames.set(game.id, { playerId: newPlayer.id });
-      
-      // Broadcast player join event
-      setTimeout(() => {
-        broadcastPlayerJoin(newPlayer).catch(err => 
-          console.warn('Failed to broadcast player join:', err)
-        );
-      }, 500);
+      const createdPlayer = newPlayer.data.createPlayer;
+      console.log('Created new player:', createdPlayer);
       
       // If this is the host, update the game's hostId
-      if (shouldBeHost && newPlayer.id) {
-        try {
-          console.log(`Updating game hostId to: ${newPlayer.id}`);
+      if (needsHost) {
+        console.log(`Setting game hostId to ${createdPlayer.id}`);
+        await client.graphql({
+          query: updateGameMutation,
+          variables: {
+            input: {
+              id: gameId,
+              hostId: createdPlayer.id
+            }
+          }
+        });
+      }
+      
+      // Store player ID in localStorage
+      localStorage.setItem(`player_${gameId}`, createdPlayer.id);
+      
+      // Set the player ID state
+      setPlayerId(createdPlayer.id);
+      setCurrentPlayer(createdPlayer);
+    } catch (error) {
+      console.error('Error creating player:', error);
+      setError('Failed to create player');
+    } finally {
+      setIsCreatingPlayer(false);
+    }
+  };
+
+  // Ensure there's always a host
+  const ensureHostExists = async () => {
+    if (!gameId || !players.length) return;
+    
+    try {
+      // Get the latest game data
+      const gameResult = await client.graphql({
+        query: getGame,
+        variables: { id: gameId }
+      });
+      
+      const currentGame = gameResult.data.getGame;
+      
+      // Check if there's a valid host
+      const hostPlayers = players.filter(p => p.isHost);
+      
+      // If multiple hosts found, keep only the first one as host
+      if (hostPlayers.length > 1) {
+        console.log(`Multiple hosts found (${hostPlayers.length}). Keeping only the first one.`);
+        
+        // Keep the first host, remove host status from others
+        for (let i = 1; i < hostPlayers.length; i++) {
+          await client.graphql({
+            query: updatePlayer,
+            variables: {
+              input: {
+                id: hostPlayers[i].id,
+                isHost: false
+              }
+            }
+          });
+          
+          // If this is the current player, update local state
+          if (hostPlayers[i].id === playerId) {
+            setCurrentPlayer({
+              ...currentPlayer!,
+              isHost: false
+            });
+          }
+        }
+        
+        // Ensure game hostId matches the remaining host
+        if (currentGame.hostId !== hostPlayers[0].id) {
           await client.graphql({
             query: updateGameMutation,
             variables: {
               input: {
-                id: game.id,
-                hostId: newPlayer.id
+                id: gameId,
+                hostId: hostPlayers[0].id
               }
             }
           });
-        } catch (hostUpdateError) {
-          console.warn('Failed to update game hostId:', hostUpdateError);
         }
       }
-      
-      if (mountedRef.current) {
-        setCurrentPlayer(newPlayer);
+      // If no host is found, assign the first player as host
+      else if (hostPlayers.length === 0 && players.length > 0) {
+        const newHost = players[0];
+        
+        console.log(`No host found. Assigning player ${newHost.id} as host`);
+        
+        // Update player to be host
+        await client.graphql({
+          query: updatePlayer,
+          variables: {
+            input: {
+              id: newHost.id,
+              isHost: true
+            }
+          }
+        });
+        
+        // Update game hostId
+        await client.graphql({
+          query: updateGameMutation,
+          variables: {
+            input: {
+              id: gameId,
+              hostId: newHost.id
+            }
+          }
+        });
+        
+        // If this is the current player, update local state
+        if (newHost.id === playerId) {
+          setCurrentPlayer({
+            ...currentPlayer!,
+            isHost: true
+          });
+        }
       }
-      return newPlayer;
     } catch (error) {
-      console.error('Error creating player:', error);
-      throw error;
-    }
-  }, [game.id, broadcastPlayerJoin]);
-
-  // Add this after the initializePlayer function
-  const fetchInitialPlayers = async () => {
-    try {
-      const result = await client.graphql({
-        query: playersByGameId,
-        variables: { gameId: game.id }
-      });
-      const initialPlayers = result.data.playersByGameId.items || [];
-      if (mountedRef.current) {
-        setPlayers(initialPlayers);
-      }
-      return initialPlayers;
-    } catch (error) {
-      console.error('Error fetching initial players:', error);
-      return [];
+      console.error('Error ensuring host exists:', error);
     }
   };
 
-  // Connect WebSocket after player is initialized
-  const connect = useCallback(async (playerId: string) => {
-    if (!playerId) {
-      console.error('Cannot connect without player ID');
-      return;
-    }
-
-    try {
-      const connection = await wsManager.getOrCreateConnection(game.id, playerId);
-      
-      connection.on('GAME_UPDATE', (data) => {
-        if (data?.id === game.id && mountedRef.current) {
-          setGame(current => ({ ...current, ...data }));
-        }
-      });
-
-      // Improved PLAYER_UPDATE handler
-      connection.on('PLAYER_UPDATE', (data) => {
-        if (!data || !mountedRef.current) return;
-        
-        console.log('Player update received:', data);
-        
-        // First fetch all players to ensure we have the latest data
-        client.graphql({
-          query: playersByGameId,
-          variables: { gameId: game.id }
-        }).then(result => {
-          const allPlayers = result.data.playersByGameId.items || [];
-          
-          if (mountedRef.current) {
-            // Create a map of players by ID for efficient lookup
-            const playerMap = new Map(allPlayers.map(p => [p.id, p]));
-            
-            // Update the specific player with the new data
-            if (data.id) {
-              playerMap.set(data.id, { ...playerMap.get(data.id) || {}, ...data });
-            }
-            
-            // Convert map back to array and update state
-            setPlayers(Array.from(playerMap.values()));
-          }
-        }).catch(error => {
-          console.error('Error fetching players after update:', error);
-        });
-      });
-
-      // Add a specific handler for PLAYER_JOIN events
-      connection.on('PLAYER_JOIN', (data) => {
-        if (!data || !mountedRef.current) return;
-        
-        console.log('New player joined:', data);
-        
-        setPlayers(current => {
-          // Check if player already exists in our list
-          const exists = current.some(p => p.id === data.id);
-          if (exists) {
-            return current; // Player already in list
-          }
-          
-          // Add the new player to our list
-          return [...current, data];
-        });
-      });
-
-      // Add a handler for initial state recovery
-      connection.on('STATE_RECOVERY', (data) => {
-        if (!data || !mountedRef.current) return;
-        
-        console.log('State recovery received:', data);
-        
-        if (data.game && data.game.id === game.id) {
-          setGame(current => ({ ...current, ...data.game }));
-        }
-        
-        if (data.players && Array.isArray(data.players)) {
-          setPlayers(data.players);
-        }
-      });
-
-      if (mountedRef.current) {
-        setIsConnected(true);
-        setError(null);
-        setReconnectAttempts(0);
-      }
-      
-      // Request current state from server
-      connection.send({
-        type: 'GET_STATE',
-        gameId: game.id
-      }).catch(err => console.warn('Failed to request state:', err));
-      
-    } catch (error) {
-      console.error('WebSocket connection error:', error);
-      if (mountedRef.current) {
-        setIsConnected(false);
-        setReconnectAttempts(prev => prev + 1);
-      }
-      setTimeout(() => {
-        if (mountedRef.current) {
-          connect(playerId);
-        }
-      }, 1000 * Math.min(reconnectAttempts + 1, 5));
-    }
-  }, [game.id, reconnectAttempts]);
-
-  // Main initialization effect
+  // Subscribe to player updates
   useEffect(() => {
-    mountedRef.current = true;
-    let timeoutId: NodeJS.Timeout;
-
-    const initialize = async () => {
-      // Check if this game has already been initialized globally
-      const existingInit = initializedGames.get(game.id);
-      if (existingInit) {
-        console.log(`Game ${game.id} already initialized globally with player ${existingInit.playerId}`);
-        
-        // If we have a player ID, use it
-        if (existingInit.playerId) {
-          try {
-            const result = await client.graphql({
-              query: getPlayer,
-              variables: { id: existingInit.playerId }
-            });
-            const player = result.data.getPlayer;
-            if (player && mountedRef.current) {
-              setCurrentPlayer(player);
-              playerInitialized.current = true;
-              
-              // Fetch players and connect
-              const initialPlayers = await fetchInitialPlayers();
-              if (!mountedRef.current) return;
-              
-              setPlayers(initialPlayers);
-              await connect(player.id);
-              setIsLoading(false);
-            }
-            return;
-          } catch (error) {
-            console.warn('Error retrieving player from global map:', error);
-            // Continue with initialization if player retrieval fails
-          }
-        }
-      }
+    if (!gameId) return;
+    
+    // Subscribe to player updates
+    const subscriptionService = new SubscriptionService();
+    
+    // Handle player updates
+    const playerUpdateHandler = (updatedPlayer: Player) => {
+      setPlayers(prevPlayers => {
+        const updated = prevPlayers.map(p => 
+          p.id === updatedPlayer.id ? updatedPlayer : p
+        );
+        return updated;
+      });
       
-      // Check if initialization is already in progress
-      if (initializationInProgress.current) {
-        console.log(`Initialization already in progress for game ${game.id}, skipping`);
-        return;
-      }
-      
-      // Check if player is already initialized for this component
-      if (playerInitialized.current) {
-        console.log(`Player already initialized for game ${game.id}, skipping`);
-        return;
-      }
-      
-      // Set initialization flags
-      initializationInProgress.current = true;
-      initializedGames.set(game.id, { playerId: null });
-      
-      console.log(`Starting initialization for game: ${game.id}`);
-      
-      try {
-        if (mountedRef.current) {
-          setIsLoading(true);
-        }
-        
-        // First initialize player
-        const player = await initializePlayer();
-        if (!mountedRef.current) {
-          console.log('Component unmounted during initialization, but continuing for global state');
-          // Still update the global map even if component unmounted
-          if (player) {
-            initializedGames.set(game.id, { playerId: player.id });
-          }
-          return;
-        }
-        
-        if (player) {
-          playerInitialized.current = true;
-          setCurrentPlayer(player);
-          
-          // Update global map
-          initializedGames.set(game.id, { playerId: player.id });
-          
-          // Log player creation here, where player is defined
-          console.log('Player created:', {
-            id: player.id,
-            isHost: player.isHost,
-            existingPlayers: players.length
-          });
-          
-          // Then fetch initial players
-          const initialPlayers = await fetchInitialPlayers();
-          if (!mountedRef.current) return;
-          
-          // Create a new array with unique players by ID
-          const uniquePlayers = [...initialPlayers];
-          
-          // Only add the current player if not already in the list
-          if (!uniquePlayers.some(p => p.id === player.id)) {
-            uniquePlayers.push(player);
-          }
-          
-          // Update state with unique players
-          setPlayers(uniquePlayers);
-          
-          // Only attempt WebSocket connection after we have a player ID
-          if (player.id) {
-            await connect(player.id);
-          }
-        }
-      } catch (error) {
-        console.error('Initialization error:', error);
-        if (mountedRef.current) {
-          setError('Failed to initialize game state');
-        }
-        // Don't remove from initialized games on error to prevent duplicate players
-      } finally {
-        if (mountedRef.current) {
-          setIsLoading(false);
-          initializationInProgress.current = false;
-        }
+      // Update current player if it's the one that was updated
+      if (playerId && updatedPlayer.id === playerId) {
+        setCurrentPlayer(updatedPlayer);
       }
     };
-
-    console.log('Initializing player for game:', game.id);
-    initialize();
-
+    
+    // Handle new players
+    const newPlayerHandler = (newPlayer: Player) => {
+      setPlayers(prevPlayers => {
+        // Only add if not already in the list
+        if (!prevPlayers.some(p => p.id === newPlayer.id)) {
+          return [...prevPlayers, newPlayer];
+        }
+        return prevPlayers;
+      });
+    };
+    
+    const playerUpdateUnsubscribe = subscriptionService.subscribeToPlayerUpdates(
+      gameId, 
+      playerUpdateHandler
+    );
+    
+    const newPlayerUnsubscribe = subscriptionService.subscribeToNewPlayers(
+      gameId,
+      newPlayerHandler
+    );
+    
+    // Cleanup subscriptions on unmount
     return () => {
-      mountedRef.current = false;
-      if (timeoutId) clearTimeout(timeoutId);
-      // Don't remove the connection on unmount, as we might remount
-      // wsManager.removeConnection(game.id);
+      playerUpdateUnsubscribe();
+      newPlayerUnsubscribe();
     };
-  }, [game.id, initializePlayer, connect]);
+  }, [gameId, playerId]);
 
-// In GameStateProvider.tsx
-const sendMessage = useCallback(async (message: WebSocketMessage) => {
-  if (!currentPlayer?.id) {
-    console.error('Cannot send message: No player ID available');
-    return;
-  }
-  
-  try {
-    const connection = await wsManager.getOrCreateConnection(game.id, currentPlayer.id);
-    await connection.send(message);
-  } catch (error) {
-    console.error('Failed to send message:', error);
-  }
-}, [game?.id, currentPlayer]);
-
-  const updateGame = useCallback(async (updates: Partial<Game>) => {
-    if (!game) return;
-    try {
-      // Update local state immediately for optimistic UI
-      setGame(current => current ? { ...current, ...updates } : null);
-      
-      // Broadcast update through WebSocket
-      const connection = await wsManager.getOrCreateConnection(game.id);
-      await connection.send({
-        type: 'GAME_UPDATE',
-        gameId: game.id,
-        data: updates
-      });
-    } catch (error) {
-      console.error('Failed to update game:', error);
-      // Revert optimistic update on error
-      setGame(game);
-    }
-  }, [game]);
-
+  // Check for host when players change
   useEffect(() => {
-    console.log('Players updated:', players);
+    if (players.length > 0 && !players.some(p => p.isHost)) {
+      ensureHostExists();
+    }
   }, [players]);
 
-  // Cleanup effect
-  useEffect(() => {
-    if (!currentPlayer || !players.length) return;
+  // Update game function
+  const updateGame = async (updates: Partial<Game>) => {
+    if (!game) {
+      console.error('Cannot update game: No game data');
+      return Promise.reject('No game data');
+    }
+    
+    try {
+      const result = await client.graphql({
+        query: updateGameMutation,
+        variables: {
+          input: {
+            id: game.id,
+            ...updates
+          }
+        }
+      });
+      
+      return result.data.updateGame;
+    } catch (error) {
+      console.error('Error updating game:', error);
+      setError('Failed to update game');
+      throw error;
+    }
+  };
 
-    const handleBeforeUnload = () => {
-      // Don't remove the connection on page unload
-      // wsManager.removeConnection(game.id);
-      // Don't remove the player ID on unload - this helps with reconnection
-      // localStorage.removeItem(`player_${game.id}`);
-    };
+  const debouncedCreatePlayer = useCallback(
+    debounce(() => {
+      if (!isCreatingPlayer) {
+        createPlayerIfNeeded();
+      }
+    }, 300),
+    [isCreatingPlayer]
+  );
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [currentPlayer, game.id, players.length]);
-
-  const value = {
+  const contextValue = {
     game,
     players,
-    isConnected,
-    sendMessage,
-    updateGame,
-    serverTimeOffset: 0,
+    currentPlayer,
     isLoading,
-    currentPlayer
+    error,
+    updateGame,
+    serverTimeOffset,
+    setError
   };
 
   return (
-    <GameStateContext.Provider value={value}>
+    <GameStateContext.Provider value={contextValue}>
       {children}
     </GameStateContext.Provider>
   );
 }
 
-export const useGameState = () => {
+// Export a hook to use the game state
+export function useGameState() {
   const context = useContext(GameStateContext);
   if (!context) {
     throw new Error('useGameState must be used within a GameStateProvider');
   }
   return context;
-}; 
+} 

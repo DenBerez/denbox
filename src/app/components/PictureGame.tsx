@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import { amplifyClient as client } from '@/utils/amplifyClient';
 import { updateGame, updatePlayer } from '@/graphql/mutations';
+import { getGame } from '@/graphql/queries';
 import { GameStatus, GameType, Player } from '@/types/game';
 import { PictureGame, PlayerDrawing } from '@/lib/games/PictureGame';
 import { DrawingData } from '@/lib/games/PictureGame';
@@ -26,8 +27,8 @@ import PostRoundScreen from './PostRoundScreen';
 import { playSound, Sounds } from '@/utils/soundEffects';
 import { usePlayerManagement } from '@/hooks/usePlayerManagement';
 import GameSettingsDialog from './GameSettingsDialog';
-import { WebSocketService } from '@/services/WebSocketService';
 import { pictureGameDefaults } from '@/constants/gameSettings';
+import { useGameState } from '@/providers/GameStateProvider';
 
 interface PictureGameProps {
   game: any;
@@ -36,6 +37,7 @@ interface PictureGameProps {
 
 export default function PictureGameComponent({ game, onGameUpdate }: PictureGameProps) {
   const { player, players, loading } = usePlayerManagement({ gameId: game.id });
+  const { isConnected, game: gameState, updateGame: updateGameState } = useGameState();
   const [timeLeft, setTimeLeft] = useState(game.timeRemaining || 60);
   const [guess, setGuess] = useState('');
   const [gameEngine, setGameEngine] = useState<PictureGame | null>(null);
@@ -46,8 +48,9 @@ export default function PictureGameComponent({ game, onGameUpdate }: PictureGame
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const wsRef = useRef<WebSocketService | null>(null);
   const mountedRef = useRef(true);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectingRef = useRef(false);
 
   // Define moveToNextDrawing before using it in useEffect
   const moveToNextDrawing = useCallback(async () => {
@@ -84,229 +87,126 @@ export default function PictureGameComponent({ game, onGameUpdate }: PictureGame
     }
   }, [game.settings]);
 
+  // Listen for game updates from gameState
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (timeLeft > 0 && game.status === GameStatus.PLAYING) {
-      timer = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            if (currentPhase === 'DRAW') {
-              setCurrentPhase('GUESS');
-              return gameEngine?.settings.guessTime || 30;
-            } else if (currentPhase === 'GUESS') {
-              moveToNextDrawing();
-            }
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [timeLeft, game.status, currentPhase, moveToNextDrawing, gameEngine?.settings.guessTime]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    let wsInstance: WebSocketService | null = null;
-
-    const initializeWebSocket = async () => {
-      if (!game.id || !player?.id) return;
-      
+    if (gameState && gameState.settings) {
       try {
-        wsInstance = new WebSocketService(game.id, player.id);
-        wsRef.current = wsInstance;
-        
-        await wsInstance.connect();
-        
-        if (!mountedRef.current) {
-          wsInstance.disconnect();
-          return;
+        const settings = JSON.parse(gameState.settings);
+        if (settings.phase && settings.phase !== currentPhase) {
+          setCurrentPhase(settings.phase);
         }
-
-        // Handle state recovery
-        wsInstance.on('STATE_RECOVERY', (data) => {
-          if (!mountedRef.current) return;
-          if (data.currentDrawing) {
-            setDrawings(new Map(Object.entries(data.currentDrawing)));
-          }
-          onGameUpdate(data);
-        });
-        
-        wsInstance.on('DRAWING_UPDATE', (data) => {
-          if (!mountedRef.current) return;
-          const { playerId, drawing } = data;
-          setDrawings(prev => {
-            const newDrawings = new Map(prev);
-            newDrawings.set(playerId, drawing);
-            return newDrawings;
-          });
-        });
-        
+        if (settings.drawings) {
+          setDrawings(new Map(settings.drawings.map((d: PlayerDrawing) => [d.playerId, d])));
+        }
       } catch (error) {
-        console.error('WebSocket connection failed:', error);
-        if (mountedRef.current) {
-          setError('Failed to connect to game server. Please try refreshing the page.');
-        }
+        console.error('Error parsing game settings:', error);
       }
-    };
-
-    if (player?.id) {
-      initializeWebSocket();
     }
+  }, [gameState, currentPhase]);
 
-    return () => {
-      mountedRef.current = false;
-      if (wsInstance) {
-        wsInstance.disconnect();
-        wsRef.current = null;
-      }
-    };
-  }, [game.id, player?.id, onGameUpdate]);
+  // Timer effect
+  useEffect(() => {
+    if (game.status !== GameStatus.PLAYING) return;
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          if (currentPhase === 'DRAW') {
+            handleDrawingComplete();
+          } else if (currentPhase === 'GUESS') {
+            moveToNextDrawing();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
-  // Show lobby if game status is LOBBY
-  if (game.status === GameStatus.LOBBY) {
-    return (
-      <Box>
-        <GameHeader game={game} />
-        <Lobby
-          game={game}
-          player={player}
-          players={players}
-          onStartGame={async () => {
-            try {
-              if (!gameEngine) return;
-              
-              // Initialize drawings for each player before starting the round
-              const initialDrawings = new Map();
-              players.forEach(p => {
-                initialDrawings.set(p.id, {
-                  playerId: p.id,
-                  drawing: null,
-                  prompt: gameEngine.getRandomPrompt(), // This should be implemented in PictureGame class
-                  guesses: []
-                });
-              });
-              
-              // Update local state
-              setDrawings(initialDrawings);
+    return () => clearInterval(timer);
+  }, [game.status, currentPhase, moveToNextDrawing]);
 
-              console.log('Initial drawings:', initialDrawings);
-              console.log('Game settings:', game.settings);
-              console.log('Game engine:', gameEngine);
-              console.log('Current phase:', currentPhase);
-              console.log('Drawings:', drawings);
-              console.log('Current drawing index:', currentDrawingIndex);
+  const handleDrawingComplete = async () => {
+    if (!player || !gameEngine) return;
 
-              
-              // Update game settings with initial drawings and phase
-              await gameEngine.updateGameState({
-                settings: JSON.stringify({
-                  ...JSON.parse(game.settings || '{}'),
-                  phase: 'DRAW',
-                  drawings: Array.from(initialDrawings.values()),
-                  status: GameStatus.PLAYING
-                })
-              });
-              
-              // Start new round in game engine
-              await gameEngine.startNewRound();
-              
-              // Play start sound
-              playSound(Sounds.START);
-              
-              // Reset local state
-              setGuess('');
-              setPrompt('');
-              setError(null);
-              setCurrentDrawingIndex(0);
-              
-              // Game update will be handled by the useEffect watching game.settings
-            } catch (error) {
-              console.error('Error starting game:', error);
-              setError('Failed to start game');
-            }
-          }}
-          settings={gameEngine?.settings}
-        />
-        <GameSettingsDialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          gameType={GameType.PICTURE_GAME}
-          settings={gameEngine?.settings || pictureGameDefaults}
-          onUpdateSettings={(newSettings) => {
-            if (gameEngine) {
-              gameEngine.updateSettings(newSettings);
-            }
-          }}
-          isHost={player?.isHost || false}
-        />
-      </Box>
-    );
-  }
-
-  // Show post-round screen if game status is ROUND_END
-  if (game.status === GameStatus.ROUND_END) {
-    return (
-      <Box>
-        <GameHeader game={game} />
-        <PostRoundScreen
-          game={game}
-          player={player}
-          onNextRound={async () => {
-            try {
-              if (!gameEngine) return;
-              await gameEngine.startNewRound();
-            } catch (error) {
-              console.error('Error starting next round:', error);
-              setError('Failed to start next round');
-            }
-          }}
-          settings={gameEngine?.settings}
-          isLastRound={game.currentRound >= (gameEngine?.settings.maxRounds || 5)}
-        />
-      </Box>
-    );
-  }
-
-  const handlePromptSubmit = async () => {
-    if (!gameEngine || !player) return;
     try {
-      await gameEngine.submitPrompt(player.id, prompt);
-      setPrompt('');
+      // Get current drawings from settings
+      const currentSettings = JSON.parse(game.settings || '{}');
+      const currentDrawings = currentSettings.drawings || [];
+      
+      // Find player's drawing
+      const playerDrawing = currentDrawings.find((d: PlayerDrawing) => d.playerId === player.id);
+      
+      if (playerDrawing) {
+        // Update game settings to move to GUESS phase
+        await updateGameState({
+          settings: JSON.stringify({
+            ...currentSettings,
+            phase: 'GUESS'
+          })
+        });
+        
+        setCurrentPhase('GUESS');
+        setTimeLeft(gameEngine.settings.guessTime || 30);
+      }
     } catch (error) {
-      console.error('Error submitting prompt:', error);
-      setError('Failed to submit prompt');
+      console.error('Error completing drawing:', error);
+      setError('Failed to complete drawing');
     }
   };
 
   const handleGuessSubmit = async () => {
-    if (!gameEngine || !player) return;
-    const currentDrawing = Array.from(drawings.values())[currentDrawingIndex];
-    if (!currentDrawing) return;
+    if (!player || !gameEngine || !guess.trim()) return;
 
     try {
-      const updatedDrawing = {
-        ...currentDrawing,
-        guesses: [...currentDrawing.guesses, { playerId: player.id, guess }]
-      };
-      drawings.set(currentDrawing.playerId, updatedDrawing);
-
-      await gameEngine.updateGameState({
+      const drawingsArray = Array.from(drawings.values());
+      const currentDrawing = drawingsArray[currentDrawingIndex];
+      
+      if (!currentDrawing) return;
+      
+      // Don't allow guessing your own drawing
+      if (currentDrawing.playerId === player.id) {
+        setError("You can't guess your own drawing!");
+        return;
+      }
+      
+      // Get current settings
+      const currentSettings = JSON.parse(game.settings || '{}');
+      const currentDrawings = currentSettings.drawings || [];
+      
+      // Find and update the current drawing with the new guess
+      const updatedDrawings = currentDrawings.map((d: PlayerDrawing) => {
+        if (d.playerId === currentDrawing.playerId) {
+          // Check if player already guessed
+          const existingGuessIndex = d.guesses.findIndex(g => g.playerId === player.id);
+          
+          if (existingGuessIndex >= 0) {
+            // Update existing guess
+            d.guesses[existingGuessIndex].guess = guess;
+          } else {
+            // Add new guess
+            d.guesses.push({
+              playerId: player.id,
+              guess
+            });
+          }
+        }
+        return d;
+      });
+      
+      // Update game settings with new guesses
+      await updateGameState({
         settings: JSON.stringify({
-          ...JSON.parse(game.settings),
-          drawings: Array.from(drawings.values())
+          ...currentSettings,
+          drawings: updatedDrawings
         })
       });
-
+      
+      // Clear guess input
       setGuess('');
+      
+      // Play sound effect
+      playSound(Sounds.SUCCESS);
     } catch (error) {
       console.error('Error submitting guess:', error);
       setError('Failed to submit guess');
@@ -315,81 +215,82 @@ export default function PictureGameComponent({ game, onGameUpdate }: PictureGame
 
   const renderPhase = () => {
     switch (currentPhase) {
-      case 'PROMPT':
-        return (
-          <Box sx={{ p: 2 }}>
-            <TextField
-              fullWidth
-              label="Enter your prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={!player}
-            />
-            <Button
-              variant="contained"
-              onClick={handlePromptSubmit}
-              disabled={!prompt}
-              sx={{ mt: 2 }}
-            >
-              Submit Prompt
-            </Button>
-          </Box>
-        );
-
       case 'DRAW':
-        const myDrawing = player ? drawings.get(player.id) : null;
         return (
           <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Draw: {myDrawing?.prompt || '...'}
+            <Typography variant="h4" gutterBottom>
+              Draw: {prompt || 'Loading prompt...'}
             </Typography>
             <DrawingCanvas
               isDrawer={true}
-              onDrawingUpdate={(drawing) => {
-                if (player) {
-                  const updatedDrawing = {
-                    ...myDrawing!,
-                    drawing
-                  };
-                  drawings.set(player.id, updatedDrawing);
-                  
-                  // Use the submitDrawing function instead of direct WebSocket call
-                  submitDrawing(updatedDrawing);
+              onDrawingUpdate={(drawingData) => {
+                if (!player) return;
+                
+                // Debounce drawing updates
+                if (debounceTimeoutRef.current) {
+                  clearTimeout(debounceTimeoutRef.current);
                 }
+                
+                debounceTimeoutRef.current = setTimeout(() => {
+                  submitDrawing({
+                    playerId: player.id,
+                    drawing: drawingData,
+                    prompt: prompt,
+                    guesses: []
+                  });
+                }, 300);
               }}
             />
           </Box>
         );
-
+      
       case 'GUESS':
-        const currentDrawing = Array.from(drawings.values())[currentDrawingIndex];
+        const drawingsArray = Array.from(drawings.values());
+        const currentDrawing = drawingsArray[currentDrawingIndex];
+        
+        if (!currentDrawing) {
+          return <Typography>No drawings available</Typography>;
+        }
+        
         return (
           <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Guess the drawing! ({currentDrawingIndex + 1}/{drawings.size})
+            <Typography variant="h4" gutterBottom>
+              Guess the drawing! ({currentDrawingIndex + 1}/{drawingsArray.length})
             </Typography>
+            <Typography variant="subtitle1">
+              Artist: {players.find(p => p.id === currentDrawing.playerId)?.name}
+            </Typography>
+            
             <DrawingCanvas
               isDrawer={false}
-              currentDrawing={currentDrawing?.drawing || null}
+              currentDrawing={currentDrawing.drawing}
             />
-            <TextField
-              fullWidth
-              label="Your guess"
-              value={guess}
-              onChange={(e) => setGuess(e.target.value)}
-              disabled={!player || currentDrawing?.playerId === player.id}
-            />
-            <Button
-              variant="contained"
-              onClick={handleGuessSubmit}
-              disabled={!guess}
-              sx={{ mt: 2 }}
-            >
-              Submit Guess
-            </Button>
+            
+            {player && currentDrawing.playerId !== player.id && (
+              <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                <TextField
+                  fullWidth
+                  label="Your guess"
+                  value={guess}
+                  onChange={(e) => setGuess(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleGuessSubmit();
+                    }
+                  }}
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleGuessSubmit}
+                  disabled={!guess.trim()}
+                >
+                  Submit
+                </Button>
+              </Box>
+            )}
           </Box>
         );
-
+      
       case 'REVEAL':
         return (
           <Box sx={{ p: 2 }}>
@@ -432,26 +333,30 @@ export default function PictureGameComponent({ game, onGameUpdate }: PictureGame
     }
   };
 
-  // Update drawing submission to use acknowledgment
+  // Update drawing submission to use GraphQL mutation
   const submitDrawing = async (drawingData: PlayerDrawing) => {
-    if (!wsRef.current || !player) return;
+    if (!player) return;
 
     try {
-      // Send real-time update via WebSocket
-      await wsRef.current.send({
-        type: 'DRAWING_UPDATE',
-        gameId: game.id,
-        data: {
-          playerId: player.id,
-          drawing: drawingData
-        }
-      });
+      // Get current settings
+      const currentSettings = JSON.parse(game.settings || '{}');
+      const currentDrawings = currentSettings.drawings || [];
       
-      // Also update persistent state
-      await gameEngine?.updateGameState({
+      // Find player's drawing in the array or add a new one
+      let updatedDrawings = [...currentDrawings];
+      const existingIndex = updatedDrawings.findIndex(d => d.playerId === player.id);
+      
+      if (existingIndex >= 0) {
+        updatedDrawings[existingIndex] = drawingData;
+      } else {
+        updatedDrawings.push(drawingData);
+      }
+      
+      // Update game settings with the new drawing
+      await updateGameState({
         settings: JSON.stringify({
-          ...JSON.parse(game.settings),
-          drawings: Array.from(drawings.values())
+          ...currentSettings,
+          drawings: updatedDrawings
         })
       });
     } catch (error) {

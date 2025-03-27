@@ -36,6 +36,7 @@ export const onCreatePlayerByGameId = /* GraphQL */ `
       id
       gameId
       name
+      avatarColor
       score
       isHost
       isConfirmed
@@ -74,6 +75,7 @@ export const onUpdatePlayerByGameId = /* GraphQL */ `
       id
       gameId
       name
+      avatarColor
       score
       isHost
       isConfirmed
@@ -199,6 +201,7 @@ export const onCreatePlayer = /* GraphQL */ `
       id
       gameId
       name
+      avatarColor
       score
       isHost
       isConfirmed
@@ -237,6 +240,7 @@ export const onUpdatePlayer = /* GraphQL */ `
       id
       gameId
       name
+      avatarColor
       score
       isHost
       isConfirmed
@@ -275,6 +279,7 @@ export const onDeletePlayer = /* GraphQL */ `
       id
       gameId
       name
+      avatarColor
       score
       isHost
       isConfirmed
@@ -424,6 +429,7 @@ export const onCreateAnswer = /* GraphQL */ `
         id
         gameId
         name
+        avatarColor
         score
         isHost
         isConfirmed
@@ -464,6 +470,7 @@ export const onUpdateAnswer = /* GraphQL */ `
         id
         gameId
         name
+        avatarColor
         score
         isHost
         isConfirmed
@@ -504,6 +511,7 @@ export const onDeleteAnswer = /* GraphQL */ `
         id
         gameId
         name
+        avatarColor
         score
         isHost
         isConfirmed

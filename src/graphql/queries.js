@@ -65,6 +65,7 @@ export const getPlayer = /* GraphQL */ `
       id
       gameId
       name
+      avatarColor
       score
       isHost
       isConfirmed
@@ -108,6 +109,7 @@ export const listPlayers = /* GraphQL */ `
         id
         gameId
         name
+        avatarColor
         score
         isHost
         isConfirmed
@@ -191,6 +193,7 @@ export const getAnswer = /* GraphQL */ `
         id
         gameId
         name
+        avatarColor
         score
         isHost
         isConfirmed
@@ -300,6 +303,7 @@ export const playersByGameId = /* GraphQL */ `
         id
         gameId
         name
+        avatarColor
         score
         isHost
         isConfirmed
